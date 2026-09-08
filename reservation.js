@@ -152,6 +152,45 @@ function syncRepeat() {
   }
   repeatPreview.textContent = text;
   repeatPreview.hidden = false;
+
+  /* Then check those dates against the calendar and say which are taken. The
+     grid above only ever shows the first date, so without this the requester
+     fills in the whole form before finding out week three is gone. Advisory
+     only — submit re-checks, and this must never block typing, so a failure
+     just leaves the plain list. A token guards against an older, slower
+     lookup landing after a newer one. */
+  const token = ++repeatPreviewToken;
+  previewSeriesAvailability(dates, token, text);
+}
+
+let repeatPreviewToken = 0;
+
+async function previewSeriesAvailability(dates, token, baseText) {
+  const room = selectedRoom();
+  const chosen = slotButtons.filter(button => button.classList.contains('selected'));
+  if (!room || !chosen.length) return;   // nothing to check the dates against yet
+
+  const startHour = Number(readZoneClock(new Date(chosen[0].dataset.start)).hour);
+  const endHour = Number(readZoneClock(new Date(chosen[chosen.length - 1].dataset.start)).hour) + 1;
+
+  try {
+    const first = parseDateValue(dates[0]);
+    const last  = parseDateValue(dates[dates.length - 1]);
+    const busy = await fetchBusyRange(room.calendarId,
+      zonedInstant(first.year, first.month, first.day, 0, 0, 0, 0),
+      zonedInstant(last.year, last.month, last.day, 23, 59, 59, 999));
+
+    if (token !== repeatPreviewToken) return;          // a newer lookup won
+    const clashes = seriesConflicts(dates, startHour, endHour, busy);
+    if (!clashes.length) return;                        // leave the plain list
+
+    repeatPreview.textContent = baseText +
+      ` ${clashes.length === 1 ? 'One date is' : clashes.length + ' dates are'} already booked ` +
+      `at those hours: ${clashes.map(shortDate).join(' · ')}.`;
+    repeatPreview.classList.add('overflows');
+  } catch (_) {
+    /* Advisory only. Submit does the check that counts. */
+  }
 }
 
 function syncAlcoholPolicy() {
@@ -681,6 +720,9 @@ function applySelection() {
   });
 
   updateSlotCount();
+  // Which repeat dates clash depends on the hours chosen, so re-run the
+  // preview. Guarded: this also runs during setup, before the control exists.
+  if (typeof syncRepeat === 'function' && repeatFrequency) syncRepeat();
 }
 
 function clearSelection() {
@@ -1174,6 +1216,7 @@ async function handleSubmit(event) {
   } : null;
 
   let stillFree = true;
+  let checkRan = false;
   try {
     if (plan) {
       /* One range query spanning the whole series, then each date's hours
@@ -1189,6 +1232,7 @@ async function handleSubmit(event) {
       const startHour = Number(readZoneClock(new Date(chosen[0].dataset.start)).hour);
       const lastSlotStart = Number(readZoneClock(new Date(chosen[chosen.length - 1].dataset.start)).hour);
       const clashes = seriesConflicts(plan.dates, startHour, lastSlotStart + 1, busy);
+      checkRan = true;
 
       if (clashes.length) {
         stillFree = false;
@@ -1204,6 +1248,7 @@ async function handleSubmit(event) {
       const fresh = await fetchBusyIntervals(room.calendarId, day);
       const taken = chosen.filter(button =>
         overlapsBusy(new Date(button.dataset.start), new Date(button.dataset.end), fresh));
+      checkRan = true;
 
       if (taken.length) {
         stillFree = false;
@@ -1220,9 +1265,24 @@ async function handleSubmit(event) {
     }
   } catch (_) {
     /* The check could not run — a network blip, or the calendar refusing.
-       Carry on and submit: this is where the form stood before the check
-       existed, and blocking every booking on a verification outage is the
-       worse failure. An admin still sees the clash at approval. */
+       What happens next depends on whether this is a series, because the two
+       cases have different last lines of defence. See below. */
+  }
+
+  /* A single date may go unverified: the Zap checks it again before creating
+     anything, so a clash is still caught. A series may not. The Zap only
+     re-checks the first date — the rest arrive as recurrence settings that
+     Google expands, and Google will happily write over an existing booking.
+     Submitting a series without this check is the one path that can
+     double-book somebody silently, so refuse it instead. */
+  if (plan && !checkRan) {
+    stillFree = false;
+    showStatus(
+      'We could not check the calendar for your repeat dates just now, and a repeating ' +
+      'request is not re-checked after it is sent. Your details are still here — ' +
+      'please try again in a moment.',
+      'error'
+    );
   }
 
   if (!stillFree) {
@@ -1363,7 +1423,7 @@ dateInput.addEventListener('change', () => { loadAvailability(); syncRepeat(); }
 repeatFrequency.addEventListener('change', syncRepeat);
 repeatCount.addEventListener('input', syncRepeat);
 form.querySelectorAll('input[name="room"]').forEach(radio =>
-  radio.addEventListener('change', () => { loadAvailability(); syncCalendarDialog(); }));
+  radio.addEventListener('change', () => { loadAvailability(); syncCalendarDialog(); syncRepeat(); }));
 clearBtn.addEventListener('click', clearSelection);
 
 prefetchAvailability();
