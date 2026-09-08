@@ -568,6 +568,17 @@ function render() {
     const b = d.document.getElementById('cal-open');
     return [b.closest('#date-window') !== null, b.parentElement.id || b.parentElement.tagName];
   });
+  /* An anchor, not a button: a button is an atomic inline-block and drops
+     whole to the next line rather than flowing with the sentence. */
+  await check('the link flows with the text rather than dropping to its own line', () => {
+    const b = d.document.getElementById('cal-open');
+    const disp = d.getComputedStyle(b).display;
+    return [b.tagName === 'A' && disp === 'inline', `<${b.tagName.toLowerCase()}> display:${disp}`];
+  });
+  await check('its href is the real calendar, so it works without JS', () => {
+    const h = d.document.getElementById('cal-open').getAttribute('href');
+    return [h.startsWith('https://calendar.google.com/'), h.slice(0, 44)];
+  });
   await check('switching room re-labels the link', () => {
     d.document.querySelectorAll('input[name="room"]').forEach(r => { r.checked = false; });
     d.document.querySelector(`input[name="room"][value="${D2.ROOMS[1].label}"]`).checked = true;
