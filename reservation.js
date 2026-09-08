@@ -1426,12 +1426,14 @@ buildRoomField();   // before draft restore, so a saved room can be re-checked
 document.getElementById('tz-note').textContent = TIME_ZONE_LABEL;
 dateInput.min = earliestBookableDate();
 dateInput.max = latestBookableDate();
-/* The range is the actionable half and the input enforces it, so the rule
-   behind it is reduced to a parenthetical. Anyone who does hit the limit gets
-   the full explanation from validation. */
+/* The explanation is kept in full; the dates and the connective are what got
+   shortened. Measured inside the card at 560px, with DARC's longer link that
+   names the room: this is two lines, and restoring either "so between" or
+   longDate's "Friday, September 18, 2026" pushes it to three. */
 document.getElementById('date-window-text').textContent =
-  `${compactDate(dateInput.min)} to ${compactDate(dateInput.max)} ` +
-  `(${MIN_LEAD_DAYS} days' notice needed).`;
+  `Requests need at least ${MIN_LEAD_DAYS} days' notice, and can be made up to ` +
+  `${MAX_MONTHS_AHEAD} months ahead — ${compactDate(dateInput.min)} ` +
+  `to ${compactDate(dateInput.max)}.`;
 dateInput.addEventListener('change', () => { loadAvailability(); syncRepeat(); });
 repeatFrequency.addEventListener('change', syncRepeat);
 repeatCount.addEventListener('input', syncRepeat);
