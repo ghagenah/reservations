@@ -386,6 +386,15 @@ function seriesConflicts(dates, startHour, endHour, busy) {
   });
 }
 
+/* "2026-09-18" -> "Sep 18, 2026". The date hint carries two of these plus the
+   calendar link, so longDate's weekday and full month name push it to three
+   lines. Error messages keep longDate — there, clarity beats brevity. */
+function compactDate(value) {
+  const [y, m, d] = value.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US',
+    { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 // Short date for the preview line, e.g. "Mon, Sep 14".
 function shortDate(value) {
   const [y, m, d] = value.split('-').map(Number);
@@ -1417,9 +1426,12 @@ buildRoomField();   // before draft restore, so a saved room can be re-checked
 document.getElementById('tz-note').textContent = TIME_ZONE_LABEL;
 dateInput.min = earliestBookableDate();
 dateInput.max = latestBookableDate();
+/* The range is the actionable half and the input enforces it, so the rule
+   behind it is reduced to a parenthetical. Anyone who does hit the limit gets
+   the full explanation from validation. */
 document.getElementById('date-window-text').textContent =
-  `Requests need at least ${MIN_LEAD_DAYS} days' notice, and can be made up to ` +
-  `${MAX_MONTHS_AHEAD} months ahead — so between ${longDate(dateInput.min)} and ${longDate(dateInput.max)}.`;
+  `${compactDate(dateInput.min)} to ${compactDate(dateInput.max)} ` +
+  `(${MIN_LEAD_DAYS} days' notice needed).`;
 dateInput.addEventListener('change', () => { loadAvailability(); syncRepeat(); });
 repeatFrequency.addEventListener('change', syncRepeat);
 repeatCount.addEventListener('input', syncRepeat);
