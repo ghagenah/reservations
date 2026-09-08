@@ -1506,8 +1506,10 @@ function syncCalendarDialog() {
 
   /* Name the room once one is chosen, so it is obvious whose calendar opens.
      A one-room space leaves it off — naming the only room is noise. */
-  calOpen.textContent = multi ? `View the full calendar for ${room.label}`
-                              : 'View the full calendar';
+  /* The full stop lives inside the link so it stays attached to the last word
+     when the line wraps, rather than stranding itself. */
+  calOpen.textContent = multi ? `View the full calendar for ${room.label}.`
+                              : 'View the full calendar.';
 
   const url = calendarEmbedUrl(room);
   calOpen.href = url;                    // works without JS, and for cmd-click

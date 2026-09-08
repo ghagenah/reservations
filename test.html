@@ -588,7 +588,7 @@ function render() {
   });
   await check('one room: always shown, and the label stays plain', () => {
     const b = w.document.getElementById('cal-open');
-    const plain = b.textContent.trim() === 'View the full calendar';
+    const plain = b.textContent.trim() === 'View the full calendar.';
     return [!b.hidden && plain, `${b.hidden ? 'HIDDEN' : 'shown'}: "${b.textContent.trim()}"`];
   });
 
