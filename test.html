@@ -346,6 +346,109 @@ function render() {
   });
   check('each space uses its own draft key', () => [DRAFT_KEY !== D2.DRAFT_KEY, `${DRAFT_KEY} vs ${D2.DRAFT_KEY}`]);
 
+  /* --- Repeating bookings. The dates are pure calendar arithmetic and the
+         conflict check pairs them with per-date instants; both are the kind of
+         logic that fails plausibly rather than loudly. */
+  group('Repeating bookings');
+
+  const occurrenceDates = read(w, 'occurrenceDates');
+  const seriesConflicts = read(w, 'seriesConflicts');
+  const utcDay = v => new Date(v + 'T00:00:00Z').getUTCDay();
+
+  check('daily ×5 from a Monday books Monday to Friday', () => {
+    const dates = occurrenceDates('2027-03-01', 'Daily', 5);   // a Monday
+    const ok = dates.length === 5 &&
+      dates.join() === '2027-03-01,2027-03-02,2027-03-03,2027-03-04,2027-03-05';
+    return [ok, dates.join(', ')];
+  });
+  check('weekly ×4 lands on the same weekday, 7 days apart', () => {
+    const dates = occurrenceDates('2027-03-01', 'Weekly', 4);
+    const sameDay = dates.every(v => utcDay(v) === utcDay(dates[0]));
+    return [dates.length === 4 && sameDay && dates[3] === '2027-03-22',
+            dates.join(', ')];
+  });
+  check('a weekly series crosses a month boundary intact', () => {
+    const dates = occurrenceDates('2027-01-25', 'Weekly', 3);
+    return [dates.join() === '2027-01-25,2027-02-01,2027-02-08', dates.join(', ')];
+  });
+  check('monthly from the 31st skips short months and still meets the count', () => {
+    const dates = occurrenceDates('2027-01-31', 'Monthly', 4);
+    return [dates.join() === '2027-01-31,2027-03-31,2027-05-31,2027-07-31',
+            dates.join(', ')];
+  });
+  check('monthly from the 15th is simply consecutive months', () => {
+    const dates = occurrenceDates('2027-01-15', 'Monthly', 3);
+    return [dates.join() === '2027-01-15,2027-02-15,2027-03-15', dates.join(', ')];
+  });
+  check('a series conflict names only the clashing date', () => {
+    const dates = occurrenceDates('2027-03-01', 'Weekly', 3);
+    const mid = parseDateValue(dates[1]);
+    const busy = [{ start: zonedInstant(mid.year, mid.month, mid.day, 9),
+                    end:   zonedInstant(mid.year, mid.month, mid.day, 11) }];
+    const clashes = seriesConflicts(dates, 10, 12, busy);
+    return [clashes.length === 1 && clashes[0] === dates[1], clashes.join(', ') || '(none)'];
+  });
+  check('a booking touching the block boundary does not clash', () => {
+    const dates = occurrenceDates('2027-03-01', 'Weekly', 2);
+    const d0 = parseDateValue(dates[0]);
+    const busy = [{ start: zonedInstant(d0.year, d0.month, d0.day, 8),
+                    end:   zonedInstant(d0.year, d0.month, d0.day, 10) }];
+    return [seriesConflicts(dates, 10, 12, busy).length === 0, 'touching 10am start'];
+  });
+  check('a series crossing the spring DST change keeps its wall-clock hours', () => {
+    // US spring-forward 2027 is Mar 14; the series straddles it.
+    const dates = occurrenceDates('2027-03-08', 'Weekly', 2);
+    const a = parseDateValue(dates[0]), b = parseDateValue(dates[1]);
+    const beforeISO = toZonedISO(zonedInstant(a.year, a.month, a.day, 9));
+    const afterISO  = toZonedISO(zonedInstant(b.year, b.month, b.day, 9));
+    const ok = beforeISO.includes('T09:00:00-08:00') && afterISO.includes('T09:00:00-07:00');
+    return [ok, `${beforeISO} / ${afterISO}`];
+  });
+
+  check('choosing a frequency reveals the count; clearing it hides it', () => {
+    const sel = w.document.getElementById('repeat-frequency');
+    const wrap = w.document.getElementById('repeat-count-wrap');
+    sel.value = 'Weekly'; read(w, 'syncRepeat')();
+    const shown = !wrap.hidden;
+    sel.value = ''; read(w, 'syncRepeat')();
+    return [shown && wrap.hidden, `shown=${shown}, hidden again=${wrap.hidden}`];
+  });
+  check('the preview lists every date the series books', () => {
+    const doc = w.document;
+    doc.getElementById('date').value = earliestBookableDate();
+    doc.getElementById('repeat-frequency').value = 'Weekly';
+    doc.getElementById('repeat-count').value = '3';
+    read(w, 'syncRepeat')();
+    const p = doc.getElementById('repeat-preview');
+    const ok = !p.hidden && p.textContent.startsWith('Books 3 dates:');
+    doc.getElementById('repeat-frequency').value = ''; read(w, 'syncRepeat')();
+    return [ok, p.textContent.slice(0, 60)];
+  });
+  check('a series past the booking window is refused at validation', () => {
+    const doc = w.document;
+    doc.getElementById('date').value = latestBookableDate();
+    doc.getElementById('repeat-frequency').value = 'Weekly';
+    doc.getElementById('repeat-count').value = '5';
+    const errors = read(w, 'fieldErrors')();
+    const hit = errors.some(e => /booking window/.test(e.message));
+    doc.getElementById('repeat-frequency').value = '';
+    doc.getElementById('date').value = '';
+    read(w, 'syncRepeat')();
+    return [hit, hit ? 'refused, names the window' : 'NOT refused'];
+  });
+  check('a count outside 2-30 is refused', () => {
+    const doc = w.document;
+    doc.getElementById('date').value = earliestBookableDate();
+    doc.getElementById('repeat-frequency').value = 'Daily';
+    doc.getElementById('repeat-count').value = '45';
+    const errors = read(w, 'fieldErrors')();
+    const hit = errors.some(e => /2 to 30/.test(e.message));
+    doc.getElementById('repeat-frequency').value = '';
+    doc.getElementById('date').value = '';
+    read(w, 'syncRepeat')();
+    return [hit, hit ? 'refused' : 'NOT refused'];
+  });
+
   /* --- The "View the full calendar" dialog. It must show the room being
          booked: Google's legend is switched off, so two overlaid calendars
          give no way to tell whose booking is whose. */

@@ -82,7 +82,8 @@
   input[type="email"],
   input[type="tel"],
   input[type="number"],
-  input[type="date"] {
+  input[type="date"],
+  select {
     width: 100%;
     padding: 11px 13px;
     font: inherit;
@@ -93,6 +94,26 @@
     border-radius: var(--radius);
     transition: border-color .15s, box-shadow .15s;
   }
+
+  .repeat-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .repeat-row select { width: auto; }
+
+  .repeat-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .repeat-count input[type="number"] { width: 5.5rem; }
+  .repeat-count[hidden] { display: none; }
+  .repeat-suffix { font-size: 14px; color: var(--muted); }
+
+  #repeat-preview { margin: 10px 0 0; }
+  #repeat-preview.overflows { color: var(--danger); }
 
   textarea {
     width: 100%;
@@ -109,6 +130,7 @@
     transition: border-color .15s, box-shadow .15s;
   }
 
+  select:focus,
   input:focus,
   textarea:focus {
     outline: none;

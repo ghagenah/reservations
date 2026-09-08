@@ -138,6 +138,29 @@
       </div>
     </div>
 
+
+    <div class="field">
+      <label for="repeat-frequency">Repeats <span class="optional">(optional)</span></label>
+      <p class="hint">Book the same hours on more than one date &mdash; pick the first date and
+         times above, then how often and how many times in total. Every date is checked
+         against the calendar when you submit.</p>
+      <div class="repeat-row">
+        <select id="repeat-frequency" name="repeatFrequency">
+          <option value="" selected>Does not repeat</option>
+          <option>Daily</option>
+          <option>Weekly</option>
+          <option>Monthly</option>
+        </select>
+        <span class="repeat-count" id="repeat-count-wrap" hidden>
+          <input type="number" id="repeat-count" name="repeatCount" min="2" max="30"
+                 inputmode="numeric" value="2"
+                 aria-label="How many times in total, including the first date">
+          <span class="repeat-suffix">times in total</span>
+        </span>
+      </div>
+      <p class="hint" id="repeat-preview" hidden></p>
+    </div>
+
     <div class="field">
       <label for="more-dates">Need the room on other dates? <span class="optional">(optional)</span></label>
       <p class="hint">Only the date and hours you picked above are confirmed. List any other dates

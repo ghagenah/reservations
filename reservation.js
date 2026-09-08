@@ -58,6 +58,11 @@ const END_HOUR   = 22;
 const form       = document.getElementById('reservation-form');
 const titleInput = document.getElementById('event-title');
 const moreDates  = document.getElementById('more-dates');
+
+const repeatFrequency = document.getElementById('repeat-frequency');
+const repeatCountWrap = document.getElementById('repeat-count-wrap');
+const repeatCount     = document.getElementById('repeat-count');
+const repeatPreview   = document.getElementById('repeat-preview');
 const occupancyBox = document.getElementById('occupancy');
 const descInput  = document.getElementById('description');
 const rpName     = document.getElementById('rp-name');
@@ -125,6 +130,30 @@ function radioValue(name) {
 }
 
 // The alcohol policy agreement only applies when alcohol is actually served.
+/* The count only appears once a frequency is chosen, and the preview lists
+   the actual dates — the one place a requester can see that monthly from the
+   31st skips short months, before anything is submitted. */
+function syncRepeat() {
+  const repeating = !!repeatFrequency.value;
+  repeatCountWrap.hidden = !repeating;
+  repeatPreview.hidden = true;
+  repeatPreview.classList.remove('overflows');
+  if (!repeating || !dateInput.value) return;
+
+  const count = Math.floor(Number(repeatCount.value));
+  if (!Number.isInteger(count) || count < 2 || count > REPEAT_MAX) return;
+
+  const dates = occurrenceDates(dateInput.value, repeatFrequency.value, count);
+  let text = `Books ${dates.length} dates: ${dates.map(shortDate).join(' · ')}.`;
+  const last = dates[dates.length - 1];
+  if (last > latestBookableDate()) {
+    text += ` The last date is past the ${MAX_MONTHS_AHEAD}-month booking window — fewer repeats will fit.`;
+    repeatPreview.classList.add('overflows');
+  }
+  repeatPreview.textContent = text;
+  repeatPreview.hidden = false;
+}
+
 function syncAlcoholPolicy() {
   const serving = radioValue('alcohol') === 'Yes, alcohol';
   alcoholPolicyBox.hidden = !serving;
@@ -275,6 +304,56 @@ function longDate(value) {
 function parseDateValue(value) {
   const [year, month, day] = value.split('-').map(Number);
   return { year, month: month - 1, day };
+}
+
+// The most repeats one request may ask for. Also the input's max attribute.
+const REPEAT_MAX = 30;
+
+/* The dates a repeating booking lands on, as "YYYY-MM-DD" values, the first
+   date included. Pure calendar arithmetic through Date.UTC — a date is not an
+   instant, so daylight saving cannot move it.
+
+   Monthly matches RRULE semantics, which is what Google Calendar does when
+   the Zap turns these settings into a recurring event: a month without the
+   day (the 31st in June) is skipped, and the count keeps going until it is
+   met. The preview and the events created from it therefore cannot disagree.
+   The guard bounds the worst case — a count of 30 on the 31st spans about
+   fifty months, and the booking-window check rejects it long before that. */
+function occurrenceDates(startValue, frequency, count) {
+  const { year, month, day } = parseDateValue(startValue);
+  const iso = d => d.toISOString().slice(0, 10);
+  const out = [];
+  if (frequency === 'Monthly') {
+    for (let m = 0; out.length < count && m < 60; m++) {
+      const d = new Date(Date.UTC(year, month + m, day));
+      if (d.getUTCDate() === day) out.push(iso(d));
+    }
+  } else {
+    const step = frequency === 'Daily' ? 1 : 7;
+    for (let i = 0; i < count; i++) {
+      out.push(iso(new Date(Date.UTC(year, month, day + i * step))));
+    }
+  }
+  return out;
+}
+
+/* Which of a series' dates clash with the busy intervals, for a block running
+   from startHour to endHour wall-clock. Each date gets its own instants, so a
+   series crossing a daylight-saving change keeps its hours. */
+function seriesConflicts(dates, startHour, endHour, busy) {
+  return dates.filter(value => {
+    const { year, month, day } = parseDateValue(value);
+    return overlapsBusy(zonedInstant(year, month, day, startHour),
+                        zonedInstant(year, month, day, endHour), busy);
+  });
+}
+
+// Short date for the preview line, e.g. "Mon, Sep 14".
+function shortDate(value) {
+  const [y, m, d] = value.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric'
+  });
 }
 
 // Plain text, e.g. "8:00 AM". Newer ICU versions put a narrow no-break space
@@ -810,7 +889,7 @@ function saveDraft() {
   saveTimer = setTimeout(() => {
     try {
       const draft = { at: Date.now() };
-      form.querySelectorAll('input, textarea').forEach(el => {
+      form.querySelectorAll('input, textarea, select').forEach(el => {
         if (!el.id && !el.name) return;
         if (NEVER_RESTORE.includes(el.id)) return;
         if (el.type === 'checkbox') draft['#' + el.id] = el.checked;
@@ -856,6 +935,7 @@ function restoreDraft() {
 
   syncSameAsMe();
   syncAlcoholPolicy();
+  syncRepeat();
   syncCalendarDialog();   // a restored room has to reach the link too
   draftNote.hidden = false;
 
@@ -878,6 +958,7 @@ function discardDraft() {
   clearStatus();
   syncSameAsMe();
   syncAlcoholPolicy();
+  syncRepeat();
   syncCalendarDialog();   // the reset cleared the room; the link named it
   resetSlots('Select a date to see available times.');
   titleInput.focus();
@@ -931,6 +1012,20 @@ function fieldErrors() {
                    `The latest date available is ${longDate(latestBookableDate())}.`);
   } else if (selectedSlots.length === 0) {
     add(slotsBox, 'Select at least one time slot.');
+  }
+
+  if (repeatFrequency.value) {
+    const count = Number(repeatCount.value);
+    if (!Number.isInteger(count) || count < 2 || count > REPEAT_MAX) {
+      add(repeatCount, `Enter how many times in total, from 2 to ${REPEAT_MAX}.`);
+    } else if (dateInput.value && dateInput.value >= earliestBookableDate()) {
+      const dates = occurrenceDates(dateInput.value, repeatFrequency.value, count);
+      const last = dates[dates.length - 1];
+      if (last > latestBookableDate()) {
+        add(repeatCount, `That many repeats runs past the ${MAX_MONTHS_AHEAD}-month booking window — ` +
+                         `the last date would be ${longDate(last)}. Reduce the count.`);
+      }
+    }
   }
 
   const total = Number(totalGuests.value);
@@ -1070,23 +1165,58 @@ async function handleSubmit(event) {
   const submitLabel = submitBtn.textContent;
   submitBtn.textContent = 'Sending…';
 
+  /* The series this request expands to, or null for a one-off. Validation has
+     already confirmed the count and that the last date fits the window. */
+  const plan = repeatFrequency.value ? {
+    frequency: repeatFrequency.value,
+    dates: occurrenceDates(dateInput.value, repeatFrequency.value,
+                           Math.floor(Number(repeatCount.value)))
+  } : null;
+
   let stillFree = true;
   try {
-    const fresh = await fetchBusyIntervals(room.calendarId, day);
-    const taken = chosen.filter(button =>
-      overlapsBusy(new Date(button.dataset.start), new Date(button.dataset.end), fresh));
+    if (plan) {
+      /* One range query spanning the whole series, then each date's hours
+         checked against it — not a query per date. The block's wall-clock
+         hours come from the chosen slots; each date gets its own instants so
+         a series crossing a daylight-saving change keeps its hours. */
+      const first = parseDateValue(plan.dates[0]);
+      const last  = parseDateValue(plan.dates[plan.dates.length - 1]);
+      const busy = await fetchBusyRange(room.calendarId,
+        zonedInstant(first.year, first.month, first.day, 0, 0, 0, 0),
+        zonedInstant(last.year, last.month, last.day, 23, 59, 59, 999));
 
-    if (taken.length) {
-      stillFree = false;
-      availabilityByCal.delete(room.calendarId);   // now known to be wrong
-      renderSlots(day, fresh);           // repaint with the truth; clears the selection
-      const which = taken.map(b => b.dataset.label.split(' – ')[0]).join(', ');
-      showStatus(
-        `Sorry — ${which} ${taken.length === 1 ? 'was' : 'were'} booked while you were filling this in. ` +
-        `Your details are still here; please pick another time.`,
-        'error'
-      );
-      slotsBox.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      const startHour = Number(readZoneClock(new Date(chosen[0].dataset.start)).hour);
+      const lastSlotStart = Number(readZoneClock(new Date(chosen[chosen.length - 1].dataset.start)).hour);
+      const clashes = seriesConflicts(plan.dates, startHour, lastSlotStart + 1, busy);
+
+      if (clashes.length) {
+        stillFree = false;
+        showStatus(
+          `Sorry — ${clashes.length === 1 ? 'one of your repeat dates already has a booking'
+                                          : clashes.length + ' of your repeat dates already have bookings'} ` +
+          `during those hours: ${clashes.map(longDate).join('; ')}. ` +
+          `Your details are still here — adjust the repeat settings, or pick different hours.`,
+          'error'
+        );
+      }
+    } else {
+      const fresh = await fetchBusyIntervals(room.calendarId, day);
+      const taken = chosen.filter(button =>
+        overlapsBusy(new Date(button.dataset.start), new Date(button.dataset.end), fresh));
+
+      if (taken.length) {
+        stillFree = false;
+        availabilityByCal.delete(room.calendarId);   // now known to be wrong
+        renderSlots(day, fresh);           // repaint with the truth; clears the selection
+        const which = taken.map(b => b.dataset.label.split(' – ')[0]).join(', ');
+        showStatus(
+          `Sorry — ${which} ${taken.length === 1 ? 'was' : 'were'} booked while you were filling this in. ` +
+          `Your details are still here; please pick another time.`,
+          'error'
+        );
+        slotsBox.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
     }
   } catch (_) {
     /* The check could not run — a network blip, or the calendar refusing.
@@ -1131,6 +1261,13 @@ async function handleSubmit(event) {
     // miss rather than burying it in the body of a notification.
     additionalDates: moreDates.value.trim(),
     occupancyAgreement: 'Yes',
+
+    // --- Repeats. The Zap has matching frequency and count fields; the dates
+    // are what those settings expand to, so an admin can read the series
+    // without doing calendar arithmetic. Every date was checked at submit.
+    repeatFrequency: repeatFrequency.value || 'Does not repeat',
+    repeatCount: plan ? String(plan.dates.length) : '1',
+    repeatDates: plan ? plan.dates.join(', ') : '',
 
     // --- Extras, safe to leave unmapped ------------------------------
     name: nameInput.value.trim(),
@@ -1222,7 +1359,9 @@ dateInput.max = latestBookableDate();
 document.getElementById('date-window-text').textContent =
   `Requests need at least ${MIN_LEAD_DAYS} days' notice, and can be made up to ` +
   `${MAX_MONTHS_AHEAD} months ahead — so between ${longDate(dateInput.min)} and ${longDate(dateInput.max)}.`;
-dateInput.addEventListener('change', loadAvailability);
+dateInput.addEventListener('change', () => { loadAvailability(); syncRepeat(); });
+repeatFrequency.addEventListener('change', syncRepeat);
+repeatCount.addEventListener('input', syncRepeat);
 form.querySelectorAll('input[name="room"]').forEach(radio =>
   radio.addEventListener('change', () => { loadAvailability(); syncCalendarDialog(); }));
 clearBtn.addEventListener('click', clearSelection);
