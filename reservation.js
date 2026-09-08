@@ -1315,10 +1315,12 @@ async function handleSubmit(event) {
     room: room.label,
     location: locationLabel(room),
 
-    // Free text, empty when unused. When it is NOT empty someone has to read it
-    // and duplicate the event by hand — availability was never checked for the
-    // dates named here, so the Zap should make a filled-in value impossible to
-    // miss rather than burying it in the body of a notification.
+    /* Free text, and now a genuine last resort: repeatDates below covers any
+       evenly spaced series, checked and booked. What reaches this field is
+       what that cannot express — irregular gaps, different hours per date.
+       Nobody checked availability for anything named here and nothing is
+       created from it, so a filled-in value needs a human. The Zap should
+       make it impossible to miss rather than bury it in a notification. */
     additionalDates: moreDates.value.trim(),
     occupancyAgreement: 'Yes',
 
