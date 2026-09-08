@@ -182,6 +182,14 @@
    payload says where the booking is. */
 const SUMMARY_KEY = 'reservation-confirmation';
 
+// "2026-09-16" -> "Wed, Sep 16". Compact enough to list a whole series.
+function shortDate(value) {
+  const [y, m, d] = value.split('-').map(Number);
+  if (!y || !m || !d) return value;
+  return new Date(y, m - 1, d).toLocaleDateString('en-US',
+    { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
 function formatDate(value) {
   if (!value) return '';
   const [y, m, d] = value.split('-').map(Number);
@@ -211,12 +219,22 @@ function formatDate(value) {
 
   // Same rows, in the same order, as the "request received" email, so the
   // page and the email that follows it do not disagree.
+  /* A repeating request booked several dates, and this page is the only place
+     the requester sees all of them at once — the emails carry the first date
+     only. So the Date row names how many, and every date is listed below it. */
+  const series = (data.repeatDates || '').split(', ').filter(Boolean);
+  const repeating = series.length > 1;
+
   const rows = [
     ['Event', data.eventTitle],
     ['Location', data.location],
-    ['Date', formatDate(data.date)],
+    [repeating ? 'First date' : 'Date', formatDate(data.date)],
     ['Time', data.startTime && data.endTime
       ? `${data.startTime} – ${data.endTime} Pacific` : ''],
+    ['Repeats', repeating
+      ? `${data.repeatFrequency}, ${series.length} times in total`
+      : ''],
+    ['All dates', repeating ? series.map(shortDate).join(' · ') : ''],
     ['Responsible', data.responsiblePartyName],
     ['Guests', data.totalGuests],
     ['Contact', data.name],

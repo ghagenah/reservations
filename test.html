@@ -517,6 +517,52 @@ function render() {
     }
   });
 
+  /* --- The confirmation page. It is the only place the requester sees every
+         date of a series at once; the emails carry the first date only. */
+  group('Confirmation summary');
+
+  const confirmRows = async (handoff) => {
+    const key = read(w, 'CONFIRMATION_KEY');   // shared by every space
+    const kept = sessionStorage.getItem(key);
+    sessionStorage.setItem(key, JSON.stringify(handoff));
+    const f = document.createElement('iframe');
+    f.style.cssText = 'width:900px;height:1200px;border:0;position:absolute;left:-9999px';
+    document.body.appendChild(f); f.src = 'confirmation.html?v=' + Math.random();
+    await new Promise(r => f.onload = r); await new Promise(r => setTimeout(r, 300));
+    const kids = [...f.contentDocument.getElementById('summary-list').children];
+    const out = {};
+    for (let i = 0; i < kids.length; i += 2) out[kids[i].textContent] = kids[i + 1].textContent;
+    f.remove();
+    if (kept === null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, kept);
+    return out;
+  };
+
+  const base = { eventTitle: 'Test', location: 'Panetta Conference Room',
+                 date: '2026-10-05', startTime: '10:00 AM', endTime: '12:00 PM',
+                 name: 'A Person', email: 'a@ucsc.edu' };
+
+  await check('a one-off shows a Date row and no repeat rows', async () => {
+    const r = await confirmRows({ ...base, repeatFrequency: '', repeatDates: '' });
+    const ok = 'Date' in r && !('Repeats' in r) && !('All dates' in r) && !('First date' in r);
+    return [ok, Object.keys(r).join(', ')];
+  });
+  await check('a series lists every date it booked', async () => {
+    const r = await confirmRows({ ...base, repeatFrequency: 'Weekly',
+      repeatDates: '2026-10-05, 2026-10-12, 2026-10-19' });
+    const ok = r['All dates'] && r['All dates'].split('·').length === 3;
+    return [ok, r['All dates'] || '(missing)'];
+  });
+  await check('a series names the frequency and the count', async () => {
+    const r = await confirmRows({ ...base, repeatFrequency: 'Weekly',
+      repeatDates: '2026-10-05, 2026-10-12, 2026-10-19' });
+    return [r['Repeats'] === 'Weekly, 3 times in total', r['Repeats'] || '(missing)'];
+  });
+  await check('a series relabels Date as First date', async () => {
+    const r = await confirmRows({ ...base, repeatFrequency: 'Monthly',
+      repeatDates: '2026-10-05, 2026-11-05' });
+    return ['First date' in r && !('Date' in r), Object.keys(r).join(', ')];
+  });
+
   /* --- The "View the full calendar" dialog. It must show the room being
          booked: Google's legend is switched off, so two overlaid calendars
          give no way to tell whose booking is whose. */
@@ -557,12 +603,11 @@ function render() {
     const b = d.document.getElementById('cal-open');
     return [b.hidden, b.hidden ? 'hidden' : 'STILL SHOWN'];
   });
-  await check('choosing a room brings it back, labelled with that room', () => {
+  await check('choosing a room brings it back', () => {
     d.document.querySelector(`input[name="room"][value="${D2.ROOMS[0].label}"]`).checked = true;
     dSync();
     const b = d.document.getElementById('cal-open');
-    return [!b.hidden && b.textContent.includes(D2.ROOMS[0].label),
-            `${b.hidden ? 'HIDDEN' : 'shown'}: "${b.textContent.trim()}"`];
+    return [!b.hidden, `${b.hidden ? 'HIDDEN' : 'shown'}: "${b.textContent.trim()}"`];
   });
   await check('the link sits inside the date sentence, not in its own block', () => {
     const b = d.document.getElementById('cal-open');
@@ -579,17 +624,22 @@ function render() {
     const h = d.document.getElementById('cal-open').getAttribute('href');
     return [h.startsWith('https://calendar.google.com/'), h.slice(0, 44)];
   });
-  await check('switching room re-labels the link', () => {
+  /* The label is the same on every space; the room it opens is named by the
+     dialog heading instead. Switching room must change the calendar without
+     changing the wording. */
+  await check('switching room changes the calendar, not the label', () => {
     d.document.querySelectorAll('input[name="room"]').forEach(r => { r.checked = false; });
     d.document.querySelector(`input[name="room"][value="${D2.ROOMS[1].label}"]`).checked = true;
     dSync();
-    const t = d.document.getElementById('cal-open').textContent;
-    return [t.includes(D2.ROOMS[1].label) && !t.includes(D2.ROOMS[0].label), `"${t.trim()}"`];
+    const t = d.document.getElementById('cal-open').textContent.trim();
+    const cal = srcsOf(d, linkOf(d));
+    return [t === 'View the full calendar.' && cal.join() === D2.ROOMS[1].label,
+            `"${t}" -> ${cal.join(', ')}`];
   });
-  await check('one room: always shown, and the label stays plain', () => {
-    const b = w.document.getElementById('cal-open');
-    const plain = b.textContent.trim() === 'View the full calendar.';
-    return [!b.hidden && plain, `${b.hidden ? 'HIDDEN' : 'shown'}: "${b.textContent.trim()}"`];
+  await check('both forms label the link identically', () => {
+    const one = w.document.getElementById('cal-open').textContent.trim();
+    const two = d.document.getElementById('cal-open').textContent.trim();
+    return [one === two && one === 'View the full calendar.', `panetta "${one}" vs darc "${two}"`];
   });
 
   await check('the link never carries more than one calendar', () => {

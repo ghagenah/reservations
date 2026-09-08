@@ -1402,7 +1402,12 @@ async function handleSubmit(event) {
         responsiblePartyName: payload.responsiblePartyName,
         totalGuests: payload.totalGuests,
         name: payload.name,
-        email: payload.email
+        email: payload.email,
+        // Empty for a one-off. The confirmation page lists the whole series,
+        // which is the only place the requester sees every date at once after
+        // submitting — the emails show the first date only.
+        repeatFrequency: plan ? payload.repeatFrequency : '',
+        repeatDates: plan ? payload.repeatDates : ''
       }));
     } catch (_) { /* the confirmation page copes without it */ }
 
@@ -1504,12 +1509,13 @@ function syncCalendarDialog() {
   calOpen.hidden = multi && !room;
   if (calOpen.hidden) return;
 
-  /* Name the room once one is chosen, so it is obvious whose calendar opens.
-     A one-room space leaves it off — naming the only room is noise. */
-  /* The full stop lives inside the link so it stays attached to the last word
+  /* The same label on every space. The room it opens is named by the dialog's
+     own heading, and on a multi-room page the picker sits directly above, so
+     repeating it here only made the two forms read differently.
+
+     The full stop lives inside the link so it stays attached to the last word
      when the line wraps, rather than stranding itself. */
-  calOpen.textContent = multi ? `View the full calendar for ${room.label}.`
-                              : 'View the full calendar.';
+  calOpen.textContent = 'View the full calendar.';
 
   const url = calendarEmbedUrl(room);
   calOpen.href = url;                    // works without JS, and for cmd-click
