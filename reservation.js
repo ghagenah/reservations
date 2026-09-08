@@ -1508,6 +1508,7 @@ function syncCalendarDialog() {
                               : 'View the full calendar';
 
   const url = calendarEmbedUrl(room);
+  calOpen.href = url;                    // works without JS, and for cmd-click
   document.getElementById('cal-newtab').href = url;
   if (calFrame.getAttribute('src') !== 'about:blank') calFrame.setAttribute('src', url);
 
@@ -1516,7 +1517,13 @@ function syncCalendarDialog() {
 
 syncCalendarDialog();
 
-calOpen.addEventListener('click', () => {
+/* An anchor rather than a button so it flows inside the date sentence — a
+   button is an atomic inline-block and drops whole to the next line when it
+   does not fit. Its href is the real calendar, so it still goes somewhere
+   without JS, and a modified click (new tab, new window) is left alone. */
+calOpen.addEventListener('click', event => {
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+  event.preventDefault();
   // Loaded on first open only; reopening reuses the frame already there.
   if (calFrame.getAttribute('src') === 'about:blank') {
     calFrame.setAttribute('src', calendarEmbedUrl(selectedRoom()));

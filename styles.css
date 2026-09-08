@@ -146,13 +146,11 @@
 
   /* ---------- Calendar dialog ---------- */
 
+  /* An anchor, so it wraps mid-phrase like the text around it. Underlined
+     through the border rather than text-decoration, which sits tighter. */
   .cal-link {
-    padding: 0;           /* it reads as part of the sentence around it */
-    font: inherit;
-    font-size: 13px;
     color: var(--blue);
-    background: none;
-    border: 0;
+    text-decoration: none;
     border-bottom: 1px solid currentColor;
     cursor: pointer;
   }
