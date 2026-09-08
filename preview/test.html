@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reservation form tests</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="tokens.css">
+
+<!--
+  Open this page in a browser. No build step, no dependencies, no runner.
+
+  It loads the real forms in hidden iframes and asserts against their own
+  functions, so there is nothing to keep in step with reservation.js — if a
+  function is renamed, the test fails loudly rather than testing a stale copy.
+
+  What it covers: the logic that fails silently and plausibly. A daylight
+  saving bug books the wrong hour, it does not throw. So does an off-by-one
+  in the busy-interval check, or a selection rule that lets a block span a
+  booked hour.
+
+  What it does not cover: the network (the calendar read and the webhook
+  post), and anything visual. Those need a live service or a human eye.
+
+  Two things to know before editing:
+
+  reservation.js is a classic script, so its `function` declarations land on
+  the frame's window but its `const` and `let` do not — those are lexical
+  globals. Everything here is read through frame.eval(), which reaches both,
+  and mutable state must be re-read rather than captured once.
+
+  The tests must also be as timezone-careful as the code. Date.getHours()
+  reads the *browser's* zone; the room's is Pacific. Use readZoneClock.
+-->
+
+<style>
+  body {
+    margin: 0;
+    padding: 32px 20px;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -.4px; }
+  .sub { margin: 0 0 22px; color: var(--muted); font-size: 14px; }
+
+  #summary {
+    padding: 14px 18px;
+    margin-bottom: 22px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--card);
+    font-weight: 700;
+  }
+  #summary.ok   { border-color: var(--success); background: var(--success-soft); color: var(--success); }
+  #summary.bad  { border-color: var(--danger);  background: var(--danger-soft);  color: var(--danger); }
+
+  section {
+    margin-bottom: 18px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--card);
+    overflow: hidden;
+  }
+  section > h2 {
+    margin: 0;
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  ol { margin: 0; padding: 8px 18px 14px 38px; }
+  li { padding: 3px 0; }
+  li.fail { color: var(--danger); font-weight: 600; }
+  .detail { color: var(--muted); font-size: 13px; }
+  li.fail .detail { color: var(--danger); }
+  .env { margin-top: 20px; color: var(--muted); font-size: 13px; }
+  iframe { position: absolute; left: -9999px; width: 900px; height: 1200px; border: 0; }
+</style>
+</head>
+<body>
+
+<main>
+  <h1>Reservation form tests</h1>
+  <p class="sub">Runs against the real forms, loaded in hidden frames. Reload to run again.</p>
+  <div id="summary">Running&hellip;</div>
+  <div id="groups"></div>
+  <p class="env" id="env"></p>
+</main>
+
+<script>
+/* ---------- tiny harness ---------- */
+
+const groups = [];
+let current = null;
+
+function group(name) {
+  current = { name, tests: [] };
+  groups.push(current);
+}
+
+/* An assertion that throws is a failure, not a crashed run — one broken
+   group should still let the rest report. */
+function check(name, fn) {
+  let pass = false, detail = '';
+  try {
+    const r = fn();
+    if (Array.isArray(r)) { pass = r[0]; detail = String(r[1]); }
+    else pass = !!r;
+  } catch (err) {
+    pass = false;
+    detail = 'threw: ' + err.message;
+  }
+  current.tests.push({ name, pass, detail });
+}
+
+function loadForm(src) {
+  return new Promise(resolve => {
+    const f = document.createElement('iframe');
+    f.src = src;
+    f.onload = () => setTimeout(() => resolve(f.contentWindow), 250);
+    document.body.appendChild(f);
+  });
+}
+
+function render() {
+  const total = groups.reduce((n, g) => n + g.tests.length, 0);
+  const failed = groups.reduce((n, g) => n + g.tests.filter(t => !t.pass).length, 0);
+
+  const sum = document.getElementById('summary');
+  sum.textContent = failed
+    ? `${failed} of ${total} failed`
+    : `All ${total} passed`;
+  sum.className = failed ? 'bad' : 'ok';
+
+  document.getElementById('groups').innerHTML = groups.map(g => `
+    <section>
+      <h2>${g.name}</h2>
+      <ol>${g.tests.map(t => `
+        <li class="${t.pass ? '' : 'fail'}">${t.pass ? '' : '✗ '}${t.name}
+          ${t.detail ? `<span class="detail">— ${t.detail}</span>` : ''}
+        </li>`).join('')}
+      </ol>
+    </section>`).join('');
+}
+
+/* ---------- the tests ---------- */
+
+(async function run() {
+  const w = await loadForm('panetta/index.html');
+
+  /* frame.eval reaches lexical globals; plain property access does not. */
+  const read = (win, expr) => win.eval(expr);
+  const grab = (win, names) => Object.fromEntries(names.map(n => [n, win.eval(n)]));
+
+  const {
+    zonedInstant, toZonedISO, formatTime, readZoneClock, overlapsBusy,
+    parseDateValue, dateValueFromToday, earliestBookableDate, latestBookableDate,
+    renderSlots, handleSlotClick, clearSelection, selectedRoom, locationLabel
+  } = grab(w, ['zonedInstant','toZonedISO','formatTime','readZoneClock','overlapsBusy',
+               'parseDateValue','dateValueFromToday','earliestBookableDate','latestBookableDate',
+               'renderSlots','handleSlotClick','clearSelection','selectedRoom','locationLabel']);
+
+  const { MIN_LEAD_DAYS, MAX_MONTHS_AHEAD, START_HOUR, END_HOUR, TIME_ZONE, ROOMS, DRAFT_KEY } =
+    grab(w, ['MIN_LEAD_DAYS','MAX_MONTHS_AHEAD','START_HOUR','END_HOUR','TIME_ZONE','ROOMS','DRAFT_KEY']);
+
+  /* --- Daylight saving. US Pacific 2026: PDT starts Mar 8, PST returns Nov 1.
+         The room is in one place, so 9:00 AM has to mean 9:00 AM there on
+         every date, and the offset carried to Zapier has to change with it. */
+  group('Time zone and daylight saving');
+
+  const at9 = (m, d) => zonedInstant(2026, m, d, 9);
+  check('9am Mar 7 carries the standard-time offset', () => {
+    const iso = toZonedISO(at9(2, 7));
+    return [iso.endsWith('-08:00'), iso];
+  });
+  check('9am Mar 8 carries the daylight offset', () => {
+    const iso = toZonedISO(at9(2, 8));
+    return [iso.endsWith('-07:00'), iso];
+  });
+  check('9am Oct 31 carries the daylight offset', () => {
+    const iso = toZonedISO(at9(9, 31));
+    return [iso.endsWith('-07:00'), iso];
+  });
+  check('9am Nov 1 carries the standard-time offset', () => {
+    const iso = toZonedISO(at9(10, 1));
+    return [iso.endsWith('-08:00'), iso];
+  });
+  check('9am stays 9am either side of the spring change', () => {
+    const a = formatTime(at9(2, 7)), b = formatTime(at9(2, 8));
+    return [a === '9:00 AM' && b === '9:00 AM', `${a} / ${b}`];
+  });
+  check('9am stays 9am either side of the autumn change', () => {
+    const a = formatTime(at9(9, 31)), b = formatTime(at9(10, 1));
+    return [a === '9:00 AM' && b === '9:00 AM', `${a} / ${b}`];
+  });
+  /* Newer ICU puts U+202F before AM/PM. It looks like a space and is not one,
+     which breaks anything downstream matching on the text. */
+  check('formatTime uses an ordinary space before AM/PM', () => {
+    const t = formatTime(at9(2, 8));
+    return [!/[  ]/.test(t), JSON.stringify(t)];
+  });
+  check('an hour is an hour across the spring forward', () => {
+    const a = zonedInstant(2026, 2, 8, 1), b = zonedInstant(2026, 2, 8, 3);
+    return [(b - a) === 3600000, `1am to 3am = ${(b - a) / 60000} min of real time`];
+  });
+
+  /* --- The booking window, which the date input, the validation and the
+         draft restore all have to agree on. */
+  group('Booking window');
+
+  check(`earliest is ${MIN_LEAD_DAYS} days out`, () => {
+    const v = earliestBookableDate();
+    return [v === dateValueFromToday({ days: MIN_LEAD_DAYS }), v];
+  });
+  check(`latest is ${MAX_MONTHS_AHEAD} months out`, () => {
+    const v = latestBookableDate();
+    return [v === dateValueFromToday({ months: MAX_MONTHS_AHEAD }), v];
+  });
+  check('the date input advertises the same window', () => {
+    const i = w.document.getElementById('date');
+    return [i.min === earliestBookableDate() && i.max === latestBookableDate(),
+            `${i.min} .. ${i.max}`];
+  });
+  check('month arithmetic rolls the year over', () => {
+    // Date.UTC normalises, so month 11 + 12 must land the following year
+    const d = new Date(Date.UTC(2026, 11 + 12, 20));
+    return [d.getUTCFullYear() === 2027 && d.getUTCMonth() === 11, d.toISOString().slice(0, 10)];
+  });
+
+  /* --- Busy intervals. The boundary cases are where an off-by-one hides:
+         a booking that ends exactly when a slot starts must not block it. */
+  group('Availability');
+
+  const D = parseDateValue(earliestBookableDate());
+  const hour = (h, m = 0) => zonedInstant(D.year, D.month, D.day, h, m);
+  const busy = (a, b) => [{ start: hour(a), end: hour(b) }];
+  const slot = [hour(9), hour(10)];
+
+  check('a booking ending at 9 does not block 9-10',
+    () => overlapsBusy(slot[0], slot[1], busy(8, 9)) === false);
+  check('a booking starting at 10 does not block 9-10',
+    () => overlapsBusy(slot[0], slot[1], busy(10, 11)) === false);
+  check('an exact match blocks it',
+    () => overlapsBusy(slot[0], slot[1], busy(9, 10)) === true);
+  check('an enclosing booking blocks it',
+    () => overlapsBusy(slot[0], slot[1], busy(8, 11)) === true);
+  check('a partial overlap blocks it',
+    () => overlapsBusy(slot[0], slot[1], [{ start: hour(9, 30), end: hour(10, 30) }]) === true);
+  check('an empty calendar blocks nothing',
+    () => overlapsBusy(slot[0], slot[1], []) === false);
+
+  /* --- The selection model. A reservation must be one unbroken run of
+         hours, because the webhook sends a single start and end. */
+  group('Slot selection');
+
+  renderSlots(D, busy(12, 13));                     // noon is taken
+  const S = () => { const s = read(w, 'selection'); return s ? `${s.start}-${s.end}` : 'none'; };
+  const buttons = () => read(w, 'slotButtons');
+  // the room's hour, not the browser's — see the note at the top of this file
+  const idx = h => buttons().findIndex(
+    b => Number(readZoneClock(new Date(b.dataset.start)).hour) === h);
+  const [h9, h10, h11, h12, h14] = [9, 10, 11, 12, 14].map(idx);
+
+  check(`renders one slot per hour from ${START_HOUR} to ${END_HOUR}`,
+    () => [buttons().length === END_HOUR - START_HOUR, `${buttons().length} slots`]);
+  check('the booked hour is disabled', () => buttons()[h12].disabled);
+  check('free hours are not', () => !buttons()[h9].disabled && !buttons()[h14].disabled);
+
+  clearSelection();
+  check('the first click starts a block', () => { handleSlotClick(h9); return [S() === `${h9}-${h9}`, S()]; });
+  check('an adjacent click grows it',     () => { handleSlotClick(h10); return [S() === `${h9}-${h10}`, S()]; });
+  check('and again',                      () => { handleSlotClick(h11); return [S() === `${h9}-${h11}`, S()]; });
+  check('a non-adjacent click is refused',() => { handleSlotClick(h14); return [S() === `${h9}-${h11}`, S()]; });
+  check('an interior click is refused',   () => { handleSlotClick(h10); return [S() === `${h9}-${h11}`, S()]; });
+  check('clicking the end shrinks it',    () => { handleSlotClick(h11); return [S() === `${h9}-${h10}`, S()]; });
+  check('clicking the start shrinks it',  () => { handleSlotClick(h9);  return [S() === `${h10}-${h10}`, S()]; });
+  check('clicking the last hour clears it',() => { handleSlotClick(h10); return [S() === 'none', S()]; });
+
+  check('a block cannot span a booked hour', () => {
+    clearSelection(); handleSlotClick(h11); handleSlotClick(h12);
+    return [S() === `${h11}-${h11}`, S()];
+  });
+  check('labels stay chronological when the block grows backwards', () => {
+    clearSelection(); handleSlotClick(h10); handleSlotClick(h11); handleSlotClick(h9);
+    const want = [h9, h10, h11].map(i => buttons()[i].dataset.label).join(' | ');
+    const got = read(w, 'selectedSlots').join(' | ');
+    return [got === want, got];
+  });
+  clearSelection();
+
+  /* --- Rooms. Panetta has one and shows no picker; DARC has two and must
+         require a choice and key availability to the chosen calendar. */
+  group('Rooms');
+
+  check('a one-room space shows no picker', () => {
+    const f = w.document.getElementById('room-field');
+    return [ROOMS.length === 1 && f.hidden, `${ROOMS.length} room, hidden=${f.hidden}`];
+  });
+  check('its single room is implicit', () => {
+    const r = selectedRoom();
+    return [!!r && r.calendarId === ROOMS[0].calendarId, r ? r.label : 'null'];
+  });
+
+  const d = await loadForm('darc/index.html');
+  const D2 = grab(d, ['ROOMS','SPACE_NAME','DRAFT_KEY']);
+  const dSelectedRoom = read(d, 'selectedRoom'), dLocationLabel = read(d, 'locationLabel');
+  check('a two-room space builds a radio per room', () => {
+    const vals = [...d.document.querySelectorAll('input[name="room"]')].map(r => r.value);
+    return [vals.length === 2 && vals.join(',') === D2.ROOMS.map(r => r.label).join(','), vals.join(', ')];
+  });
+  check('its picker is visible', () => !d.document.getElementById('room-field').hidden);
+  /* Clear the radios first. A saved draft re-checks the room on load, so
+     asserting "nothing is chosen" on a fresh page only holds on a browser
+     that has never touched this form. */
+  check('with no room checked, none is selected', () => {
+    d.document.querySelectorAll('input[name="room"]').forEach(r => { r.checked = false; });
+    const r = dSelectedRoom();
+    return [r === null, r ? r.label : 'null'];
+  });
+  check('choosing one selects it', () => {
+    const want = D2.ROOMS[1].label;
+    d.document.querySelector(`input[name="room"][value="${want}"]`).checked = true;
+    const r = dSelectedRoom();
+    return [!!r && r.label === want, r ? r.label : 'null'];
+  });
+  check('the location names the space and the room', () => {
+    const l = dLocationLabel(dSelectedRoom());
+    return [l === `${D2.SPACE_NAME} — ${D2.ROOMS[1].label}`, l];
+  });
+  check('every room has a real calendar, not a placeholder', () => {
+    const bad = D2.ROOMS.filter(r => !/@group\.calendar\.google\.com$/.test(r.calendarId));
+    return [bad.length === 0, bad.length ? bad.map(r => r.label).join(', ') : D2.ROOMS.map(r => r.label).join(' + ')];
+  });
+  check('the rooms have different calendars', () => {
+    const ids = D2.ROOMS.map(r => r.calendarId);
+    return [new Set(ids).size === ids.length, `${ids.length} rooms, ${new Set(ids).size} calendars`];
+  });
+  check('each space uses its own draft key', () => [DRAFT_KEY !== D2.DRAFT_KEY, `${DRAFT_KEY} vs ${D2.DRAFT_KEY}`]);
+
+  /* --- Repeating bookings. The dates are pure calendar arithmetic and the
+         conflict check pairs them with per-date instants; both are the kind of
+         logic that fails plausibly rather than loudly. */
+  group('Repeating bookings');
+
+  const occurrenceDates = read(w, 'occurrenceDates');
+  const seriesConflicts = read(w, 'seriesConflicts');
+  const utcDay = v => new Date(v + 'T00:00:00Z').getUTCDay();
+
+  check('daily ×5 from a Monday books Monday to Friday', () => {
+    const dates = occurrenceDates('2027-03-01', 'Daily', 5);   // a Monday
+    const ok = dates.length === 5 &&
+      dates.join() === '2027-03-01,2027-03-02,2027-03-03,2027-03-04,2027-03-05';
+    return [ok, dates.join(', ')];
+  });
+  check('weekly ×4 lands on the same weekday, 7 days apart', () => {
+    const dates = occurrenceDates('2027-03-01', 'Weekly', 4);
+    const sameDay = dates.every(v => utcDay(v) === utcDay(dates[0]));
+    return [dates.length === 4 && sameDay && dates[3] === '2027-03-22',
+            dates.join(', ')];
+  });
+  check('a weekly series crosses a month boundary intact', () => {
+    const dates = occurrenceDates('2027-01-25', 'Weekly', 3);
+    return [dates.join() === '2027-01-25,2027-02-01,2027-02-08', dates.join(', ')];
+  });
+  check('monthly from the 31st skips short months and still meets the count', () => {
+    const dates = occurrenceDates('2027-01-31', 'Monthly', 4);
+    return [dates.join() === '2027-01-31,2027-03-31,2027-05-31,2027-07-31',
+            dates.join(', ')];
+  });
+  check('monthly from the 15th is simply consecutive months', () => {
+    const dates = occurrenceDates('2027-01-15', 'Monthly', 3);
+    return [dates.join() === '2027-01-15,2027-02-15,2027-03-15', dates.join(', ')];
+  });
+  check('a series conflict names only the clashing date', () => {
+    const dates = occurrenceDates('2027-03-01', 'Weekly', 3);
+    const mid = parseDateValue(dates[1]);
+    const busy = [{ start: zonedInstant(mid.year, mid.month, mid.day, 9),
+                    end:   zonedInstant(mid.year, mid.month, mid.day, 11) }];
+    const clashes = seriesConflicts(dates, 10, 12, busy);
+    return [clashes.length === 1 && clashes[0] === dates[1], clashes.join(', ') || '(none)'];
+  });
+  check('a booking touching the block boundary does not clash', () => {
+    const dates = occurrenceDates('2027-03-01', 'Weekly', 2);
+    const d0 = parseDateValue(dates[0]);
+    const busy = [{ start: zonedInstant(d0.year, d0.month, d0.day, 8),
+                    end:   zonedInstant(d0.year, d0.month, d0.day, 10) }];
+    return [seriesConflicts(dates, 10, 12, busy).length === 0, 'touching 10am start'];
+  });
+  check('a series crossing the spring DST change keeps its wall-clock hours', () => {
+    // US spring-forward 2027 is Mar 14; the series straddles it.
+    const dates = occurrenceDates('2027-03-08', 'Weekly', 2);
+    const a = parseDateValue(dates[0]), b = parseDateValue(dates[1]);
+    const beforeISO = toZonedISO(zonedInstant(a.year, a.month, a.day, 9));
+    const afterISO  = toZonedISO(zonedInstant(b.year, b.month, b.day, 9));
+    const ok = beforeISO.includes('T09:00:00-08:00') && afterISO.includes('T09:00:00-07:00');
+    return [ok, `${beforeISO} / ${afterISO}`];
+  });
+
+  check('choosing a frequency reveals the count; clearing it hides it', () => {
+    const sel = w.document.getElementById('repeat-frequency');
+    const wrap = w.document.getElementById('repeat-count-wrap');
+    sel.value = 'Weekly'; read(w, 'syncRepeat')();
+    const shown = !wrap.hidden;
+    sel.value = ''; read(w, 'syncRepeat')();
+    return [shown && wrap.hidden, `shown=${shown}, hidden again=${wrap.hidden}`];
+  });
+  check('the preview lists every date the series books', () => {
+    const doc = w.document;
+    doc.getElementById('date').value = earliestBookableDate();
+    doc.getElementById('repeat-frequency').value = 'Weekly';
+    doc.getElementById('repeat-count').value = '3';
+    read(w, 'syncRepeat')();
+    const p = doc.getElementById('repeat-preview');
+    const ok = !p.hidden && p.textContent.startsWith('Books 3 dates:');
+    doc.getElementById('repeat-frequency').value = ''; read(w, 'syncRepeat')();
+    return [ok, p.textContent.slice(0, 60)];
+  });
+  check('a series past the booking window is refused at validation', () => {
+    const doc = w.document;
+    doc.getElementById('date').value = latestBookableDate();
+    doc.getElementById('repeat-frequency').value = 'Weekly';
+    doc.getElementById('repeat-count').value = '5';
+    const errors = read(w, 'fieldErrors')();
+    const hit = errors.some(e => /booking window/.test(e.message));
+    doc.getElementById('repeat-frequency').value = '';
+    doc.getElementById('date').value = '';
+    read(w, 'syncRepeat')();
+    return [hit, hit ? 'refused, names the window' : 'NOT refused'];
+  });
+  check('a count outside 2-30 is refused', () => {
+    const doc = w.document;
+    doc.getElementById('date').value = earliestBookableDate();
+    doc.getElementById('repeat-frequency').value = 'Daily';
+    doc.getElementById('repeat-count').value = '45';
+    const errors = read(w, 'fieldErrors')();
+    const hit = errors.some(e => /2 to 30/.test(e.message));
+    doc.getElementById('repeat-frequency').value = '';
+    doc.getElementById('date').value = '';
+    read(w, 'syncRepeat')();
+    return [hit, hit ? 'refused' : 'NOT refused'];
+  });
+
+  /* --- The "View the full calendar" dialog. It must show the room being
+         booked: Google's legend is switched off, so two overlaid calendars
+         give no way to tell whose booking is whose. */
+  group('Calendar dialog follows the room');
+
+  const srcsOf = (win, href) => {
+    const byId = Object.fromEntries(win.eval('ROOMS').map(r => [r.calendarId, r.label]));
+    return new URL(href).searchParams.getAll('src').map(x => byId[x] || 'unknown');
+  };
+  const linkOf = win => win.document.getElementById('cal-newtab').href;
+  const titleOf = win => win.document.getElementById('cal-dialog-title').textContent;
+  const dSync = read(d, 'syncCalendarDialog');
+
+  check('one room: the link carries just that calendar', () => {
+    const got = srcsOf(w, linkOf(w));
+    return [got.length === 1 && got[0] === ROOMS[0].label, got.join(', ')];
+  });
+  check('one room: the heading stays generic', () => [titleOf(w) === 'Room availability', titleOf(w)]);
+
+  for (const i of [0, 1]) {
+    check(`choosing ${D2.ROOMS[i].label}: only its calendar is shown`, () => {
+      d.document.querySelector(`input[name="room"][value="${D2.ROOMS[i].label}"]`).checked = true;
+      dSync();
+      const got = srcsOf(d, linkOf(d));
+      return [got.length === 1 && got[0] === D2.ROOMS[i].label, got.join(', ')];
+    });
+    check(`choosing ${D2.ROOMS[i].label}: the heading names it`, () => {
+      const t = titleOf(d);
+      return [t === `${D2.ROOMS[i].label} availability`, t];
+    });
+  }
+
+  /* With two rooms there is nothing to show until one is picked, so the link
+     is absent rather than present-but-dead. */
+  check('two rooms, none chosen: the link is invisible but holds its space', () => {
+    d.document.querySelectorAll('input[name="room"]').forEach(r => { r.checked = false; });
+    dSync();
+    const h = d.document.getElementById('cal-hint');
+    const invisible = d.getComputedStyle(h).visibility === 'hidden';
+    const holdsSpace = h.getBoundingClientRect().height > 0;
+    return [invisible && holdsSpace, `${invisible ? 'invisible' : 'VISIBLE'}, height ${Math.round(h.getBoundingClientRect().height)}px`];
+  });
+  check('choosing a room brings it back, labelled with that room', () => {
+    d.document.querySelector(`input[name="room"][value="${D2.ROOMS[0].label}"]`).checked = true;
+    dSync();
+    const h = d.document.getElementById('cal-hint');
+    const b = d.document.getElementById('cal-open');
+    const shown = d.getComputedStyle(h).visibility === 'visible';
+    return [shown && b.textContent.includes(D2.ROOMS[0].label), `${shown ? 'shown' : 'HIDDEN'}: "${b.textContent.trim()}"`];
+  });
+  check('switching room re-labels the link', () => {
+    d.document.querySelectorAll('input[name="room"]').forEach(r => { r.checked = false; });
+    d.document.querySelector(`input[name="room"][value="${D2.ROOMS[1].label}"]`).checked = true;
+    dSync();
+    const t = d.document.getElementById('cal-open').textContent;
+    return [t.includes(D2.ROOMS[1].label) && !t.includes(D2.ROOMS[0].label), `"${t.trim()}"`];
+  });
+  check('one room: always shown, and the label stays plain', () => {
+    const h = w.document.getElementById('cal-hint');
+    const b = w.document.getElementById('cal-open');
+    const plain = b.textContent.trim() === 'View the full calendar';
+    const shown = w.getComputedStyle(h).visibility === 'visible';
+    return [shown && plain, `${shown ? 'shown' : 'HIDDEN'}: "${b.textContent.trim()}"`];
+  });
+
+  check('the link never carries more than one calendar', () => {
+    d.document.querySelector(`input[name="room"][value="${D2.ROOMS[1].label}"]`).checked = true;
+    dSync();
+    const got = srcsOf(d, linkOf(d));
+    return [got.length === 1, `${got.length}: ${got.join(', ')}`];
+  });
+
+  /* Start over resets the form; anything derived from a field has to follow.
+     This one did not, and the link went on naming a room nobody had chosen. */
+  check('Start over hides the link along with the room', () => {
+    d.document.querySelector(`input[name="room"][value="${D2.ROOMS[0].label}"]`).checked = true;
+    dSync();
+    d.document.getElementById('discard-draft').click();
+    const cleared = !d.document.querySelector('input[name="room"]:checked');
+    const hidden = d.getComputedStyle(d.document.getElementById('cal-hint')).visibility === 'hidden';
+    return [cleared && hidden,
+            `room ${cleared ? 'cleared' : 'STILL SET'}, link ${hidden ? 'hidden' : 'STILL SHOWN'}`];
+  });
+
+  check('choosing a room moves nothing below it', () => {
+    const dateTop = () => Math.round(
+      d.document.querySelector('label[for="date"]').getBoundingClientRect().top);
+    d.document.querySelectorAll('input[name="room"]').forEach(r => { r.checked = false; });
+    dSync();
+    const before = dateTop();
+    d.document.querySelector(`input[name="room"][value="${D2.ROOMS[0].label}"]`).checked = true;
+    dSync();
+    const after = dateTop();
+    return [before === after, `date field moved ${Math.abs(after - before)}px`];
+  });
+
+  check('the frame stays unloaded until the dialog is opened', () => {
+    const src = d.document.getElementById('cal-frame').getAttribute('src');
+    return [src === 'about:blank', src.slice(0, 40)];
+  });
+
+  /* --- Accessibility. The asterisk is aria-hidden decoration, so anything it
+         marks has to carry required or aria-required or a screen reader never
+         hears about it. Written as a sweep rather than a list of six fields,
+         so a new field added without it fails here. */
+  group('Required fields are announced');
+
+  const controlFor = (doc, star) => {
+    const holder = star.closest('label, legend, .agree');
+    if (!holder) return null;
+    if (holder.tagName === 'LEGEND') {
+      const fs = holder.closest('fieldset');
+      return fs && fs.querySelector('input, select, textarea');
+    }
+    return holder.control
+        || (holder.htmlFor && doc.getElementById(holder.htmlFor))
+        || holder.querySelector('input, select, textarea');
+  };
+  const announced = el => el.hasAttribute('required') || el.getAttribute('aria-required') === 'true';
+
+  for (const [label, doc] of [['Panetta', w.document], ['DARC', d.document]]) {
+    check(`${label}: every required-marked field is announced as required`, () => {
+      const stars = [...doc.querySelectorAll('.req')];
+      const missing = stars
+        .map(sp => controlFor(doc, sp))
+        .filter(el => el && !announced(el))
+        .map(el => el.name || el.id);
+      return [missing.length === 0,
+              missing.length ? `missing on: ${[...new Set(missing)].join(', ')}`
+                             : `${stars.length} marked, all announced`];
+    });
+    check(`${label}: the asterisk itself stays hidden from screen readers`, () => {
+      const bad = [...doc.querySelectorAll('.req')].filter(sp => sp.getAttribute('aria-hidden') !== 'true');
+      return [bad.length === 0, bad.length ? `${bad.length} not aria-hidden` : 'all aria-hidden'];
+    });
+  }
+
+  /* --- Drafts. What bit the test above: a saved draft is re-applied on load.
+         Worth asserting directly, including the part that must NOT come back. */
+  group('Draft restore');
+
+  const DKEY = D2.DRAFT_KEY;
+  const savedDraft = localStorage.getItem(DKEY);          // put the real one back after
+  try {
+    localStorage.setItem(DKEY, JSON.stringify({
+      at: Date.now(),
+      '@room': D2.ROOMS[0].label,
+      '#event-title': 'Restored from a draft',
+      '#occupancy': true, '#checklist-agree': true, '#alcohol-agree': true
+    }));
+    const r = await loadForm('darc/index.html');
+
+    check('a saved room comes back', () => {
+      const picked = r.document.querySelector('input[name="room"]:checked');
+      return [!!picked && picked.value === D2.ROOMS[0].label, picked ? picked.value : 'none'];
+    });
+    check('a saved text field comes back', () => {
+      const v = r.document.getElementById('event-title').value;
+      return [v === 'Restored from a draft', v || '(empty)'];
+    });
+    /* Agreeing has to be a deliberate act each time. If these ever came back
+       ticked, someone would submit liability terms they never read. */
+    check('the occupancy agreement does NOT come back', () => !r.document.getElementById('occupancy').checked);
+    check('the checklist agreement does NOT come back', () => !r.document.getElementById('checklist-agree').checked);
+    check('the alcohol agreement does NOT come back', () => !r.document.getElementById('alcohol-agree').checked);
+    check('the draft notice is shown', () => !r.document.getElementById('draft-note').hidden);
+  } finally {
+    if (savedDraft === null) localStorage.removeItem(DKEY);
+    else localStorage.setItem(DKEY, savedDraft);
+  }
+
+  render();
+  document.getElementById('env').textContent =
+    `Room zone ${TIME_ZONE} · this browser ${Intl.DateTimeFormat().resolvedOptions().timeZone}` +
+    ` · ${new Date().toISOString().slice(0, 10)}`;
+})();
+</script>
+
+</body>
+</html>

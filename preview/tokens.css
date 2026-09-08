@@ -1,0 +1,51 @@
+/* =========================================================
+   Colour and radius tokens, shared by every page.
+
+   Split out because all four pages need the palette but cannot share
+   styles.css — that sheet is the booking form's, and index, confirmation
+   and guide define .card, body and h1 differently. Tokens have no element
+   selectors, so there is nothing to collide with.
+
+   Before this file the palette was copied into four places. They happened
+   to agree; nothing made them.
+   ========================================================= */
+
+:root {
+  /* UC Santa Cruz brand — communications.ucsc.edu/brand-overview/color */
+  --blue: #003c6c;
+  --gold: #fdc700;           /* blocks only, 1.6:1 on white — never text */
+  --teal: #007988;
+  --rubine: #da216d;
+
+  /* Neutrals are not specified by the brand. These are derived with a blue
+     bias toward the primary so they read as chosen rather than default. */
+  --ink: #12212e;
+  --muted: #5b6b79;
+  --muted-strong: #4a5967;
+  --line: #d5dee6;
+  --line-soft: #dde5ec;
+  --bg: #edf1f5;
+  --card: #ffffff;
+  --surface: #f4f7fa;
+
+  /* Tints, each with the border that goes beside it. */
+  --blue-dark: #00294a;
+  --blue-soft: #e6eef4;
+  --blue-line: #a9c3d6;
+  --gold-soft: #fff8e0;
+  --teal-soft: #e3f0f1;
+  --rubine-soft: #fdeaf2;
+  --rubine-line: #f5b9d2;
+
+  /* Semantic names, pointing at the brand colour they use rather than
+     repeating its hex — so the choice is visible and can only be made once. */
+  --success: var(--teal);
+  --success-soft: var(--teal-soft);
+  --danger: var(--rubine);
+  --danger-soft: var(--rubine-soft);
+  --danger-line: var(--rubine-line);
+
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+}

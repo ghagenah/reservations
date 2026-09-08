@@ -1,0 +1,855 @@
+/* =========================================================
+   Arts Division room reservations — shared form styles.
+
+   Loaded by every space page (panetta/, darc/, …) after tokens.css.
+
+   Not loaded by index, confirmation or guide: those define .card, body,
+   h1 and .hero differently, so these rules would leak into them. They
+   share tokens.css only.
+   ========================================================= */
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 40px 20px;
+    min-height: 100vh;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 560px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    overflow: hidden;              /* so the banner can reach the card edges */
+    box-shadow: 0 1px 2px rgba(18, 33, 46, .05), 0 12px 32px rgba(18, 33, 46, .09);
+    padding: 32px;
+  }
+
+  /* Full-bleed banner: negative margins cancel the card padding. Shorter than
+     the guide's, since this page is a task and the photo should not push the
+     first field down the screen. 68% biases the crop to the signage. */
+  .hero {
+    display: block;
+    width: calc(100% + 64px);
+    margin: -32px -32px 26px;
+    height: auto;                  /* the height attribute would otherwise
+                                      override aspect-ratio */
+    aspect-ratio: 5 / 2;
+    object-fit: cover;
+    object-position: center 82%;
+    background: var(--surface);
+  }
+
+  header { margin-bottom: 28px; }
+
+  h1 {
+    margin: 0 0 6px;
+    font-size: 24px;
+    font-weight: 650;
+    letter-spacing: -.02em;
+  }
+
+  .subtitle {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .field { margin-bottom: 20px; }
+
+  label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .req { color: var(--danger); font-weight: 400; }
+
+  input[type="text"],
+  input[type="email"],
+  input[type="tel"],
+  input[type="number"],
+  input[type="date"],
+  select {
+    width: 100%;
+    padding: 11px 13px;
+    font: inherit;
+    font-size: 15px;
+    color: var(--ink);
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    transition: border-color .15s, box-shadow .15s;
+  }
+
+  .repeat-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .repeat-row select { width: auto; }
+
+  .repeat-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .repeat-count input[type="number"] { width: 5.5rem; }
+  .repeat-count[hidden] { display: none; }
+  .repeat-suffix { font-size: 14px; color: var(--muted); }
+
+  #repeat-preview { margin: 10px 0 0; }
+  #repeat-preview.overflows { color: var(--danger); }
+
+  textarea {
+    width: 100%;
+    padding: 11px 13px;
+    font: inherit;
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--ink);
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    resize: vertical;
+    min-height: 78px;
+    transition: border-color .15s, box-shadow .15s;
+  }
+
+  select:focus,
+  input:focus,
+  textarea:focus {
+    outline: none;
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px rgba(0, 60, 108, .18);
+  }
+
+  .optional { color: var(--muted); font-weight: 400; }
+
+  .field .hint { margin-top: -2px; }
+
+  input[type="number"] { width: 8rem; }
+
+  /* ---------- Calendar dialog ---------- */
+
+  .cal-link {
+    padding: 4px 0 1px;   /* a little breathing room above, underline kept tight */
+    font: inherit;
+    font-size: 13px;
+    color: var(--blue);
+    background: none;
+    border: 0;
+    border-bottom: 1px solid currentColor;
+    cursor: pointer;
+  }
+  .cal-link:hover { color: var(--blue-dark); }
+
+  /* Belongs to the room picker above it, not the date field below. Sibling
+     margins collapse to the larger, so the fieldset's own 20px is trimmed for
+     this one case rather than fought with a negative margin here. */
+  #room-field:not([hidden]) { margin-bottom: 6px; }
+  /* .hint is defined further down and would win at equal specificity, so
+     this is qualified rather than silently overridden. */
+  .hint.cal-hint { margin: 0 0 22px; }
+
+  /* Held in the layout rather than removed, so choosing a room does not
+     shove the date field around. visibility also takes it out of the tab
+     order and off the accessibility tree, which display:none would too. */
+  .hint.cal-hint.is-empty { visibility: hidden; }
+
+  #cal-dialog {
+    width: min(92vw, 900px);
+    max-width: 900px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #fff;
+    color: var(--ink);
+    overflow: hidden;
+  }
+  #cal-dialog::backdrop { background: rgba(18, 33, 46, .55); }
+
+  .cal-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+  }
+  .cal-head h2 {
+    margin: 0;
+    white-space: nowrap;
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .cal-close {
+    padding: 0 6px;
+    font-size: 24px;
+    line-height: 1;
+    color: var(--muted);
+    background: none;
+    border: 0;
+    cursor: pointer;
+  }
+  .cal-close:hover { color: var(--ink); }
+
+  /* Fixed viewport height so the month grid is usable without the dialog
+     growing past the screen on a laptop. */
+  .cal-body { height: min(70vh, 620px); }
+  .cal-body iframe { display: block; width: 100%; height: 100%; border: 0; }
+
+  /* Sits in the header rather than a footer bar of its own, which cost a
+     whole row of height for one line of text. */
+  .cal-note {
+    flex: 1;
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--muted);
+  }
+  .cal-newtab { color: var(--blue); white-space: nowrap; }
+
+  @media (max-width: 480px) {
+    #cal-dialog { width: 96vw; }
+    .cal-body { height: 68vh; }
+    .cal-head { flex-wrap: wrap; row-gap: 8px; }
+    /* The note drops to its own row, so the title has to push the close
+       button to the edge on the first one. */
+    .cal-head h2 { margin-right: auto; }
+    .cal-note { order: 3; width: 100%; flex: none; }
+  }
+
+  /* ---------- Section headings ---------- */
+
+  .form-section {
+    margin: 30px 0 18px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+  }
+
+  .form-section:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+
+  .form-section h2 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--blue);
+  }
+
+  .form-section p {
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* ---------- Radio groups ---------- */
+
+  fieldset {
+    margin: 0 0 20px;
+    padding: 0;
+    border: 0;
+  }
+
+  legend {
+    padding: 0;
+    margin-bottom: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  fieldset .hint { margin: 0 0 10px; }
+
+  .choices { display: flex; flex-direction: column; gap: 8px; }
+
+  .choice {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.45;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: border-color .12s, background .12s;
+  }
+
+  .choice:hover { border-color: var(--blue); background: var(--blue-soft); }
+
+  .choice input[type="radio"] {
+    flex: none;
+    width: 17px;
+    height: 17px;
+    margin: 1px 0 0;
+    accent-color: var(--blue);
+    cursor: pointer;
+  }
+
+  .choice:has(input:checked) {
+    border-color: var(--blue);
+    background: var(--blue-soft);
+  }
+
+  .choice:has(input:focus-visible) {
+    box-shadow: 0 0 0 3px rgba(0, 60, 108, .22);
+  }
+
+  .choice .sub {
+    display: block;
+    font-weight: 400;
+    font-size: 12.5px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  /* ---------- Demo fill (testing only) ---------- */
+
+  .demo-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+    margin-bottom: 22px;
+    padding: 12px 14px;
+    background: var(--gold-soft);
+    border: 1px dashed var(--gold);
+    border-radius: var(--radius);
+    font-size: 13px;
+    color: var(--ink);
+  }
+
+  .demo-bar[hidden] { display: none; }
+
+  .demo-bar strong { font-weight: 700; }
+  .demo-bar .grow { flex: 1 1 auto; }
+
+  .demo-bar button {
+    padding: 7px 13px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--ink);            /* white on gold is 1.6:1 — ink is 14:1 */
+    background: var(--gold);
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+
+  .demo-bar button:hover { background: #e6b400; }
+  .demo-bar button:disabled { opacity: .6; cursor: not-allowed; }
+
+  .demo-bar button:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+  }
+
+  /* ---------- Inline validation ---------- */
+
+  .field-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--danger);
+  }
+
+  .field-error::before {
+    content: "!";
+    flex: none;
+    width: 15px;
+    height: 15px;
+    margin-top: 2px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 15px;
+    text-align: center;
+    color: #fff;
+    background: var(--danger);
+    border-radius: 50%;
+  }
+
+  .has-error input[type="text"],
+  .has-error input[type="email"],
+  .has-error input[type="tel"],
+  .has-error input[type="number"],
+  .has-error input[type="date"],
+  .has-error textarea {
+    border-color: var(--danger);
+    background: #fff7fa;
+  }
+
+  .has-error .choice { border-color: #f0a3c3; }
+
+  .error-summary {
+    margin-bottom: 24px;
+    padding: 14px 16px;
+    background: var(--danger-soft);
+    border: 1px solid var(--danger-line);
+    border-radius: var(--radius);
+  }
+
+  .error-summary[hidden] { display: none; }
+
+  .error-summary h2 {
+    margin: 0 0 8px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--danger);
+  }
+
+  .error-summary ul { margin: 0; padding-left: 18px; }
+  .error-summary li { margin-bottom: 4px; font-size: 13px; }
+  .error-summary li:last-child { margin-bottom: 0; }
+
+  .error-summary a {
+    color: var(--danger);
+    text-underline-offset: 2px;
+  }
+
+  .error-summary a:hover { text-decoration: none; }
+
+  /* ---------- Draft notice ---------- */
+
+  .draft-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+    margin-bottom: 22px;
+    padding: 11px 14px;
+    background: var(--blue-soft);
+    border: 1px solid var(--blue-line);
+    border-radius: var(--radius);
+    font-size: 13px;
+    color: var(--blue-dark);
+  }
+
+  .draft-note[hidden] { display: none; }
+
+  .draft-note button {
+    padding: 0;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--blue-dark);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  /* ---------- Same as requester ---------- */
+
+  .same-as-me {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 18px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .same-as-me input[type="checkbox"] {
+    flex: none;
+    width: 17px;
+    height: 17px;
+    margin: 0;
+    accent-color: var(--blue);
+    cursor: pointer;
+  }
+
+  .field[hidden], .conditional .field[hidden] { display: none; }
+
+  /* ---------- Event checklist ---------- */
+
+  .checklist {
+    margin-bottom: 24px;
+    padding: 18px 20px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+
+  .checklist .lead {
+    margin: 0 0 6px;
+    font-size: 13px;
+    color: var(--ink);
+  }
+
+  .checklist .lead + .lead { margin-bottom: 12px; }
+
+  .checklist ol {
+    margin: 0 0 12px;
+    padding-left: 22px;
+    font-size: 13px;
+    color: var(--ink);
+  }
+
+  .checklist ol li { margin-bottom: 9px; line-height: 1.5; }
+  .checklist ol li:last-child { margin-bottom: 0; }
+  .checklist ol li::marker { font-weight: 700; color: var(--blue); }
+
+  .checklist .updated {
+    margin: 0 0 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line-soft);
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .checklist .terms { margin: 0 0 14px; }
+  .checklist .terms p {
+    margin: 0 0 9px;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--ink);
+  }
+  .checklist .terms p:last-child { margin-bottom: 0; }
+
+  /* ---------- Conditional block ---------- */
+
+  .conditional {
+    margin: -8px 0 20px;
+    padding: 14px 16px;
+    background: var(--gold-soft);
+    border: 1px solid var(--gold);
+    border-radius: var(--radius);
+  }
+
+  .conditional[hidden] { display: none; }
+
+  .conditional p {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: var(--ink);
+  }
+
+  /* ---------- Occupancy agreement ---------- */
+
+  .occupancy {
+    margin-bottom: 24px;
+    padding: 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+
+  .occupancy > p {
+    margin: 0 0 12px;
+    font-size: 13px;
+    color: var(--ink);
+  }
+
+  .occupancy .caps {
+    margin: 0 0 14px;
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+  }
+
+  .occupancy .caps th,
+  .occupancy .caps td {
+    text-align: left;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--line-soft);
+    vertical-align: baseline;
+  }
+
+  .occupancy .caps tr:last-child th,
+  .occupancy .caps tr:last-child td { border-bottom: none; }
+
+  .occupancy .caps th {
+    width: 3.4em;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  .occupancy .caps td { color: var(--muted); padding-left: 10px; }
+
+  .agree {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.45;
+  }
+
+  .agree input[type="checkbox"] {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    margin: 1px 0 0;
+    accent-color: var(--blue);
+    cursor: pointer;
+  }
+
+  .agree input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+  }
+
+  /* ---------- Slots ---------- */
+
+  .slots-section { margin-bottom: 24px; }
+
+  .slots-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    margin-bottom: 8px;
+  }
+
+  .slots-head label { margin-bottom: 0; }
+
+  .head-right {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .count {
+    font-size: 13px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .clear-btn {
+    padding: 0;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--blue);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .clear-btn:hover { color: var(--blue-dark); }
+
+  .hint {
+    margin: 0 0 12px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .slot-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+
+  .slot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 11px 6px;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background .12s, border-color .12s, color .12s, transform .06s;
+  }
+
+  .slot .until {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--muted);
+  }
+
+  .slot:hover {
+    border-color: var(--blue);
+    background: var(--blue-soft);
+  }
+
+  .slot:focus-visible {
+    outline: none;
+    border-color: var(--blue);
+    box-shadow: 0 0 0 3px rgba(0, 60, 108, .22);
+  }
+
+  .slot:active { transform: scale(.98); }
+
+  .slot.selected,
+  .slot.selected:hover {
+    background: var(--blue);
+    border-color: var(--blue);
+    color: #fff;
+  }
+
+  .slot.selected .until { color: rgba(255, 255, 255, .8); }
+
+  /* Mid-block hours can't be removed without splitting the block. */
+  .slot.selected.interior { cursor: default; }
+
+  /* Available, but not adjacent to the current block. */
+  .slot.blocked,
+  .slot.blocked:hover {
+    background: #fff;
+    border-color: var(--line);
+    opacity: .38;
+    cursor: not-allowed;
+    pointer-events: none;
+    transform: none;
+  }
+
+  .slot.unavailable,
+  .slot.unavailable:hover {
+    background: var(--surface);
+    border-color: var(--line);
+    border-style: dashed;
+    color: #8c9aa6;
+    cursor: not-allowed;
+    pointer-events: none;
+    transform: none;
+  }
+
+  /* Struck on the time itself — text-decoration on the button would
+     propagate to the status line below it and can't be cancelled there. */
+  .slot.unavailable .slot-time { text-decoration: line-through; }
+
+  .slot.unavailable .until { color: #8c9aa6; }
+
+  /* ---------- Messages ---------- */
+
+  .placeholder,
+  .loading,
+  .slot-error {
+    padding: 18px;
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+    font-size: 14px;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  .loading { color: var(--blue); border-color: var(--blue-line); background: var(--blue-soft); }
+
+  .slot-error {
+    color: var(--danger);
+    border-style: solid;
+    border-color: var(--danger-line);
+    background: var(--danger-soft);
+    text-align: left;
+  }
+
+  .retry {
+    margin-top: 8px;
+    padding: 6px 12px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--danger);
+    background: #fff;
+    border: 1px solid var(--danger-line);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+
+  .retry:hover { background: var(--danger-soft); }
+
+  .spinner {
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    margin-right: 8px;
+    vertical-align: -2px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+
+  /* ---------- Submit ---------- */
+
+  .submit {
+    width: 100%;
+    padding: 13px;
+    font: inherit;
+    font-size: 15px;
+    font-weight: 650;
+    color: #fff;
+    background: var(--blue);
+    border: none;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background .15s;
+  }
+
+  .submit:hover:not(:disabled) { background: var(--blue-dark); }
+
+  .submit:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(0, 60, 108, .38);
+  }
+
+  .submit:disabled { opacity: .6; cursor: not-allowed; }
+
+  .status {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    border: 1px solid transparent;
+  }
+
+  .status[hidden] { display: none; }
+  .status.info    { color: var(--blue);    background: var(--blue-soft);   border-color: var(--blue-line); }
+  .status.error   { color: var(--danger);  background: var(--danger-soft); border-color: var(--danger-line); }
+  .status.success { color: var(--success); background: var(--success-soft);border-color: #a8d3d8; }
+
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  @media (max-width: 480px) {
+    body { padding: 20px 12px; }
+    .card { padding: 22px; }
+    .hero { width: calc(100% + 44px); margin: -22px -22px 20px; aspect-ratio: 2 / 1; }
+    .slot-grid { grid-template-columns: repeat(2, 1fr); }
+  }
