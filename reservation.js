@@ -87,7 +87,6 @@ const calDialog = document.getElementById('cal-dialog');
 const calFrame  = document.getElementById('cal-frame');
 const calTitle  = document.getElementById('cal-dialog-title');
 const calOpen   = document.getElementById('cal-open');
-const calHint   = document.getElementById('cal-hint');
 
 // ucsc.edu and its subdomains, e.g. soe.ucsc.edu
 const UCSC_EMAIL = /^[^@\s]+@([a-z0-9-]+\.)*ucsc\.edu$/i;
@@ -1484,17 +1483,12 @@ function syncCalendarDialog() {
   const multi = ROOMS.length > 1;
   const room = selectedRoom();
 
-  /* With more than one room there is no sensible calendar to show until one
-     is picked — overlaying both says nothing about the room being booked. The
-     label says what to do rather than just going grey. */
-  /* With more than one room there is nothing to show until one is picked. The
-     link is made invisible rather than removed, so its space is already
-     reserved and the fields below do not jump when a room is chosen. Its
-     label is left alone while hidden, so the space held matches the text
-     that will appear in it. */
-  const empty = multi && !room;
-  calHint.classList.toggle('is-empty', empty);
-  if (empty) return;
+  /* With more than one room there is nothing to show until one is picked —
+     overlaying both says nothing about the room being booked. The link sits
+     inside the date sentence, so hiding it just shortens that line; nothing
+     below moves, and no blank space has to be held open for it. */
+  calOpen.hidden = multi && !room;
+  if (calOpen.hidden) return;
 
   /* Name the room once one is chosen, so it is obvious whose calendar opens.
      A one-room space leaves it off — naming the only room is noise. */
