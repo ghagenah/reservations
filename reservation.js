@@ -58,6 +58,11 @@ const END_HOUR   = 22;
 const form       = document.getElementById('reservation-form');
 const titleInput = document.getElementById('event-title');
 const moreDates  = document.getElementById('more-dates');
+
+const repeatFrequency = document.getElementById('repeat-frequency');
+const repeatCountWrap = document.getElementById('repeat-count-wrap');
+const repeatCount     = document.getElementById('repeat-count');
+const repeatPreview   = document.getElementById('repeat-preview');
 const occupancyBox = document.getElementById('occupancy');
 const descInput  = document.getElementById('description');
 const rpName     = document.getElementById('rp-name');
@@ -82,7 +87,6 @@ const calDialog = document.getElementById('cal-dialog');
 const calFrame  = document.getElementById('cal-frame');
 const calTitle  = document.getElementById('cal-dialog-title');
 const calOpen   = document.getElementById('cal-open');
-const calHint   = document.getElementById('cal-hint');
 
 // ucsc.edu and its subdomains, e.g. soe.ucsc.edu
 const UCSC_EMAIL = /^[^@\s]+@([a-z0-9-]+\.)*ucsc\.edu$/i;
@@ -125,6 +129,69 @@ function radioValue(name) {
 }
 
 // The alcohol policy agreement only applies when alcohol is actually served.
+/* The count only appears once a frequency is chosen, and the preview lists
+   the actual dates — the one place a requester can see that monthly from the
+   31st skips short months, before anything is submitted. */
+function syncRepeat() {
+  const repeating = !!repeatFrequency.value;
+  repeatCountWrap.hidden = !repeating;
+  repeatPreview.hidden = true;
+  repeatPreview.classList.remove('overflows');
+  if (!repeating || !dateInput.value) return;
+
+  const count = Math.floor(Number(repeatCount.value));
+  if (!Number.isInteger(count) || count < 2 || count > REPEAT_MAX) return;
+
+  const dates = occurrenceDates(dateInput.value, repeatFrequency.value, count);
+  let text = `Books ${dates.length} dates: ${dates.map(shortDate).join(' · ')}.`;
+  const last = dates[dates.length - 1];
+  if (last > latestBookableDate()) {
+    text += ` The last date is past the ${MAX_MONTHS_AHEAD}-month booking window — fewer repeats will fit.`;
+    repeatPreview.classList.add('overflows');
+  }
+  repeatPreview.textContent = text;
+  repeatPreview.hidden = false;
+
+  /* Then check those dates against the calendar and say which are taken. The
+     grid above only ever shows the first date, so without this the requester
+     fills in the whole form before finding out week three is gone. Advisory
+     only — submit re-checks, and this must never block typing, so a failure
+     just leaves the plain list. A token guards against an older, slower
+     lookup landing after a newer one. */
+  const token = ++repeatPreviewToken;
+  previewSeriesAvailability(dates, token, text);
+}
+
+let repeatPreviewToken = 0;
+
+async function previewSeriesAvailability(dates, token, baseText) {
+  const room = selectedRoom();
+  const chosen = slotButtons.filter(button => button.classList.contains('selected'));
+  if (!room || !chosen.length) return;   // nothing to check the dates against yet
+
+  const startHour = Number(readZoneClock(new Date(chosen[0].dataset.start)).hour);
+  const endHour = Number(readZoneClock(new Date(chosen[chosen.length - 1].dataset.start)).hour) + 1;
+
+  try {
+    const first = parseDateValue(dates[0]);
+    const last  = parseDateValue(dates[dates.length - 1]);
+    const busy = await fetchBusyRange(room.calendarId,
+      zonedInstant(first.year, first.month, first.day, 0, 0, 0, 0),
+      zonedInstant(last.year, last.month, last.day, 23, 59, 59, 999));
+
+    if (token !== repeatPreviewToken) return;          // a newer lookup won
+    const clashes = seriesConflicts(dates, startHour, endHour, busy);
+    if (!clashes.length) return;                        // leave the plain list
+
+    repeatPreview.textContent = baseText +
+      ` ${clashes.length === 1 ? 'One date is' : clashes.length + ' dates are'} already booked ` +
+      `at those hours: ${clashes.map(shortDate).join(' · ')}.`;
+    repeatPreview.classList.add('overflows');
+  } catch (_) {
+    /* Advisory only. Submit does the check that counts. */
+  }
+}
+
 function syncAlcoholPolicy() {
   const serving = radioValue('alcohol') === 'Yes, alcohol';
   alcoholPolicyBox.hidden = !serving;
@@ -275,6 +342,65 @@ function longDate(value) {
 function parseDateValue(value) {
   const [year, month, day] = value.split('-').map(Number);
   return { year, month: month - 1, day };
+}
+
+// The most repeats one request may ask for. Also the input's max attribute.
+const REPEAT_MAX = 30;
+
+/* The dates a repeating booking lands on, as "YYYY-MM-DD" values, the first
+   date included. Pure calendar arithmetic through Date.UTC — a date is not an
+   instant, so daylight saving cannot move it.
+
+   Monthly matches RRULE semantics, which is what Google Calendar does when
+   the Zap turns these settings into a recurring event: a month without the
+   day (the 31st in June) is skipped, and the count keeps going until it is
+   met. The preview and the events created from it therefore cannot disagree.
+   The guard bounds the worst case — a count of 30 on the 31st spans about
+   fifty months, and the booking-window check rejects it long before that. */
+function occurrenceDates(startValue, frequency, count) {
+  const { year, month, day } = parseDateValue(startValue);
+  const iso = d => d.toISOString().slice(0, 10);
+  const out = [];
+  if (frequency === 'Monthly') {
+    for (let m = 0; out.length < count && m < 60; m++) {
+      const d = new Date(Date.UTC(year, month + m, day));
+      if (d.getUTCDate() === day) out.push(iso(d));
+    }
+  } else {
+    const step = frequency === 'Daily' ? 1 : 7;
+    for (let i = 0; i < count; i++) {
+      out.push(iso(new Date(Date.UTC(year, month, day + i * step))));
+    }
+  }
+  return out;
+}
+
+/* Which of a series' dates clash with the busy intervals, for a block running
+   from startHour to endHour wall-clock. Each date gets its own instants, so a
+   series crossing a daylight-saving change keeps its hours. */
+function seriesConflicts(dates, startHour, endHour, busy) {
+  return dates.filter(value => {
+    const { year, month, day } = parseDateValue(value);
+    return overlapsBusy(zonedInstant(year, month, day, startHour),
+                        zonedInstant(year, month, day, endHour), busy);
+  });
+}
+
+/* "2026-09-18" -> "Sep 18, 2026". The date hint carries two of these plus the
+   calendar link, so longDate's weekday and full month name push it to three
+   lines. Error messages keep longDate — there, clarity beats brevity. */
+function compactDate(value) {
+  const [y, m, d] = value.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US',
+    { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// Short date for the preview line, e.g. "Mon, Sep 14".
+function shortDate(value) {
+  const [y, m, d] = value.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric'
+  });
 }
 
 // Plain text, e.g. "8:00 AM". Newer ICU versions put a narrow no-break space
@@ -602,6 +728,9 @@ function applySelection() {
   });
 
   updateSlotCount();
+  // Which repeat dates clash depends on the hours chosen, so re-run the
+  // preview. Guarded: this also runs during setup, before the control exists.
+  if (typeof syncRepeat === 'function' && repeatFrequency) syncRepeat();
 }
 
 function clearSelection() {
@@ -810,7 +939,7 @@ function saveDraft() {
   saveTimer = setTimeout(() => {
     try {
       const draft = { at: Date.now() };
-      form.querySelectorAll('input, textarea').forEach(el => {
+      form.querySelectorAll('input, textarea, select').forEach(el => {
         if (!el.id && !el.name) return;
         if (NEVER_RESTORE.includes(el.id)) return;
         if (el.type === 'checkbox') draft['#' + el.id] = el.checked;
@@ -856,6 +985,7 @@ function restoreDraft() {
 
   syncSameAsMe();
   syncAlcoholPolicy();
+  syncRepeat();
   syncCalendarDialog();   // a restored room has to reach the link too
   draftNote.hidden = false;
 
@@ -878,6 +1008,7 @@ function discardDraft() {
   clearStatus();
   syncSameAsMe();
   syncAlcoholPolicy();
+  syncRepeat();
   syncCalendarDialog();   // the reset cleared the room; the link named it
   resetSlots('Select a date to see available times.');
   titleInput.focus();
@@ -931,6 +1062,20 @@ function fieldErrors() {
                    `The latest date available is ${longDate(latestBookableDate())}.`);
   } else if (selectedSlots.length === 0) {
     add(slotsBox, 'Select at least one time slot.');
+  }
+
+  if (repeatFrequency.value) {
+    const count = Number(repeatCount.value);
+    if (!Number.isInteger(count) || count < 2 || count > REPEAT_MAX) {
+      add(repeatCount, `Enter how many times in total, from 2 to ${REPEAT_MAX}.`);
+    } else if (dateInput.value && dateInput.value >= earliestBookableDate()) {
+      const dates = occurrenceDates(dateInput.value, repeatFrequency.value, count);
+      const last = dates[dates.length - 1];
+      if (last > latestBookableDate()) {
+        add(repeatCount, `That many repeats runs past the ${MAX_MONTHS_AHEAD}-month booking window — ` +
+                         `the last date would be ${longDate(last)}. Reduce the count.`);
+      }
+    }
   }
 
   const total = Number(totalGuests.value);
@@ -1070,29 +1215,82 @@ async function handleSubmit(event) {
   const submitLabel = submitBtn.textContent;
   submitBtn.textContent = 'Sending…';
 
-  let stillFree = true;
-  try {
-    const fresh = await fetchBusyIntervals(room.calendarId, day);
-    const taken = chosen.filter(button =>
-      overlapsBusy(new Date(button.dataset.start), new Date(button.dataset.end), fresh));
+  /* The series this request expands to, or null for a one-off. Validation has
+     already confirmed the count and that the last date fits the window. */
+  const plan = repeatFrequency.value ? {
+    frequency: repeatFrequency.value,
+    dates: occurrenceDates(dateInput.value, repeatFrequency.value,
+                           Math.floor(Number(repeatCount.value)))
+  } : null;
 
-    if (taken.length) {
-      stillFree = false;
-      availabilityByCal.delete(room.calendarId);   // now known to be wrong
-      renderSlots(day, fresh);           // repaint with the truth; clears the selection
-      const which = taken.map(b => b.dataset.label.split(' – ')[0]).join(', ');
-      showStatus(
-        `Sorry — ${which} ${taken.length === 1 ? 'was' : 'were'} booked while you were filling this in. ` +
-        `Your details are still here; please pick another time.`,
-        'error'
-      );
-      slotsBox.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  let stillFree = true;
+  let checkRan = false;
+  try {
+    if (plan) {
+      /* One range query spanning the whole series, then each date's hours
+         checked against it — not a query per date. The block's wall-clock
+         hours come from the chosen slots; each date gets its own instants so
+         a series crossing a daylight-saving change keeps its hours. */
+      const first = parseDateValue(plan.dates[0]);
+      const last  = parseDateValue(plan.dates[plan.dates.length - 1]);
+      const busy = await fetchBusyRange(room.calendarId,
+        zonedInstant(first.year, first.month, first.day, 0, 0, 0, 0),
+        zonedInstant(last.year, last.month, last.day, 23, 59, 59, 999));
+
+      const startHour = Number(readZoneClock(new Date(chosen[0].dataset.start)).hour);
+      const lastSlotStart = Number(readZoneClock(new Date(chosen[chosen.length - 1].dataset.start)).hour);
+      const clashes = seriesConflicts(plan.dates, startHour, lastSlotStart + 1, busy);
+      checkRan = true;
+
+      if (clashes.length) {
+        stillFree = false;
+        showStatus(
+          `Sorry — ${clashes.length === 1 ? 'one of your repeat dates already has a booking'
+                                          : clashes.length + ' of your repeat dates already have bookings'} ` +
+          `during those hours: ${clashes.map(longDate).join('; ')}. ` +
+          `Your details are still here — adjust the repeat settings, or pick different hours.`,
+          'error'
+        );
+      }
+    } else {
+      const fresh = await fetchBusyIntervals(room.calendarId, day);
+      const taken = chosen.filter(button =>
+        overlapsBusy(new Date(button.dataset.start), new Date(button.dataset.end), fresh));
+      checkRan = true;
+
+      if (taken.length) {
+        stillFree = false;
+        availabilityByCal.delete(room.calendarId);   // now known to be wrong
+        renderSlots(day, fresh);           // repaint with the truth; clears the selection
+        const which = taken.map(b => b.dataset.label.split(' – ')[0]).join(', ');
+        showStatus(
+          `Sorry — ${which} ${taken.length === 1 ? 'was' : 'were'} booked while you were filling this in. ` +
+          `Your details are still here; please pick another time.`,
+          'error'
+        );
+        slotsBox.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
     }
   } catch (_) {
     /* The check could not run — a network blip, or the calendar refusing.
-       Carry on and submit: this is where the form stood before the check
-       existed, and blocking every booking on a verification outage is the
-       worse failure. An admin still sees the clash at approval. */
+       What happens next depends on whether this is a series, because the two
+       cases have different last lines of defence. See below. */
+  }
+
+  /* A single date may go unverified: the Zap checks it again before creating
+     anything, so a clash is still caught. A series may not. The Zap only
+     re-checks the first date — the rest arrive as recurrence settings that
+     Google expands, and Google will happily write over an existing booking.
+     Submitting a series without this check is the one path that can
+     double-book somebody silently, so refuse it instead. */
+  if (plan && !checkRan) {
+    stillFree = false;
+    showStatus(
+      'We could not check the calendar for your repeat dates just now, and a repeating ' +
+      'request is not re-checked after it is sent. Your details are still here — ' +
+      'please try again in a moment.',
+      'error'
+    );
   }
 
   if (!stillFree) {
@@ -1125,12 +1323,21 @@ async function handleSubmit(event) {
     room: room.label,
     location: locationLabel(room),
 
-    // Free text, empty when unused. When it is NOT empty someone has to read it
-    // and duplicate the event by hand — availability was never checked for the
-    // dates named here, so the Zap should make a filled-in value impossible to
-    // miss rather than burying it in the body of a notification.
+    /* Free text, and now a genuine last resort: repeatDates below covers any
+       evenly spaced series, checked and booked. What reaches this field is
+       what that cannot express — irregular gaps, different hours per date.
+       Nobody checked availability for anything named here and nothing is
+       created from it, so a filled-in value needs a human. The Zap should
+       make it impossible to miss rather than bury it in a notification. */
     additionalDates: moreDates.value.trim(),
     occupancyAgreement: 'Yes',
+
+    // --- Repeats. The Zap has matching frequency and count fields; the dates
+    // are what those settings expand to, so an admin can read the series
+    // without doing calendar arithmetic. Every date was checked at submit.
+    repeatFrequency: repeatFrequency.value || 'Does not repeat',
+    repeatCount: plan ? String(plan.dates.length) : '1',
+    repeatDates: plan ? plan.dates.join(', ') : '',
 
     // --- Extras, safe to leave unmapped ------------------------------
     name: nameInput.value.trim(),
@@ -1219,12 +1426,19 @@ buildRoomField();   // before draft restore, so a saved room can be re-checked
 document.getElementById('tz-note').textContent = TIME_ZONE_LABEL;
 dateInput.min = earliestBookableDate();
 dateInput.max = latestBookableDate();
+/* The explanation is kept in full; the dates and the connective are what got
+   shortened. Measured inside the card at 560px, with DARC's longer link that
+   names the room: this is two lines, and restoring either "so between" or
+   longDate's "Friday, September 18, 2026" pushes it to three. */
 document.getElementById('date-window-text').textContent =
   `Requests need at least ${MIN_LEAD_DAYS} days' notice, and can be made up to ` +
-  `${MAX_MONTHS_AHEAD} months ahead — so between ${longDate(dateInput.min)} and ${longDate(dateInput.max)}.`;
-dateInput.addEventListener('change', loadAvailability);
+  `${MAX_MONTHS_AHEAD} months ahead — ${compactDate(dateInput.min)} ` +
+  `to ${compactDate(dateInput.max)}.`;
+dateInput.addEventListener('change', () => { loadAvailability(); syncRepeat(); });
+repeatFrequency.addEventListener('change', syncRepeat);
+repeatCount.addEventListener('input', syncRepeat);
 form.querySelectorAll('input[name="room"]').forEach(radio =>
-  radio.addEventListener('change', () => { loadAvailability(); syncCalendarDialog(); }));
+  radio.addEventListener('change', () => { loadAvailability(); syncCalendarDialog(); syncRepeat(); }));
 clearBtn.addEventListener('click', clearSelection);
 
 prefetchAvailability();
@@ -1283,24 +1497,22 @@ function syncCalendarDialog() {
   const multi = ROOMS.length > 1;
   const room = selectedRoom();
 
-  /* With more than one room there is no sensible calendar to show until one
-     is picked — overlaying both says nothing about the room being booked. The
-     label says what to do rather than just going grey. */
-  /* With more than one room there is nothing to show until one is picked. The
-     link is made invisible rather than removed, so its space is already
-     reserved and the fields below do not jump when a room is chosen. Its
-     label is left alone while hidden, so the space held matches the text
-     that will appear in it. */
-  const empty = multi && !room;
-  calHint.classList.toggle('is-empty', empty);
-  if (empty) return;
+  /* With more than one room there is nothing to show until one is picked —
+     overlaying both says nothing about the room being booked. The link sits
+     inside the date sentence, so hiding it just shortens that line; nothing
+     below moves, and no blank space has to be held open for it. */
+  calOpen.hidden = multi && !room;
+  if (calOpen.hidden) return;
 
   /* Name the room once one is chosen, so it is obvious whose calendar opens.
      A one-room space leaves it off — naming the only room is noise. */
-  calOpen.textContent = multi ? `View the full calendar for ${room.label}`
-                              : 'View the full calendar';
+  /* The full stop lives inside the link so it stays attached to the last word
+     when the line wraps, rather than stranding itself. */
+  calOpen.textContent = multi ? `View the full calendar for ${room.label}.`
+                              : 'View the full calendar.';
 
   const url = calendarEmbedUrl(room);
+  calOpen.href = url;                    // works without JS, and for cmd-click
   document.getElementById('cal-newtab').href = url;
   if (calFrame.getAttribute('src') !== 'about:blank') calFrame.setAttribute('src', url);
 
@@ -1309,7 +1521,13 @@ function syncCalendarDialog() {
 
 syncCalendarDialog();
 
-calOpen.addEventListener('click', () => {
+/* An anchor rather than a button so it flows inside the date sentence — a
+   button is an atomic inline-block and drops whole to the next line when it
+   does not fit. Its href is the real calendar, so it still goes somewhere
+   without JS, and a modified click (new tab, new window) is left alone. */
+calOpen.addEventListener('click', event => {
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+  event.preventDefault();
   // Loaded on first open only; reopening reuses the frame already there.
   if (calFrame.getAttribute('src') === 'about:blank') {
     calFrame.setAttribute('src', calendarEmbedUrl(selectedRoom()));

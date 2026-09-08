@@ -82,7 +82,8 @@
   input[type="email"],
   input[type="tel"],
   input[type="number"],
-  input[type="date"] {
+  input[type="date"],
+  select {
     width: 100%;
     padding: 11px 13px;
     font: inherit;
@@ -93,6 +94,26 @@
     border-radius: var(--radius);
     transition: border-color .15s, box-shadow .15s;
   }
+
+  .repeat-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .repeat-row select { width: auto; }
+
+  .repeat-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .repeat-count input[type="number"] { width: 5.5rem; }
+  .repeat-count[hidden] { display: none; }
+  .repeat-suffix { font-size: 14px; color: var(--muted); }
+
+  #repeat-preview { margin: 10px 0 0; }
+  #repeat-preview.overflows { color: var(--danger); }
 
   textarea {
     width: 100%;
@@ -109,6 +130,7 @@
     transition: border-color .15s, box-shadow .15s;
   }
 
+  select:focus,
   input:focus,
   textarea:focus {
     outline: none;
@@ -124,30 +146,15 @@
 
   /* ---------- Calendar dialog ---------- */
 
+  /* An anchor, so it wraps mid-phrase like the text around it. Underlined
+     through the border rather than text-decoration, which sits tighter. */
   .cal-link {
-    padding: 4px 0 1px;   /* a little breathing room above, underline kept tight */
-    font: inherit;
-    font-size: 13px;
     color: var(--blue);
-    background: none;
-    border: 0;
+    text-decoration: none;
     border-bottom: 1px solid currentColor;
     cursor: pointer;
   }
   .cal-link:hover { color: var(--blue-dark); }
-
-  /* Belongs to the room picker above it, not the date field below. Sibling
-     margins collapse to the larger, so the fieldset's own 20px is trimmed for
-     this one case rather than fought with a negative margin here. */
-  #room-field:not([hidden]) { margin-bottom: 6px; }
-  /* .hint is defined further down and would win at equal specificity, so
-     this is qualified rather than silently overridden. */
-  .hint.cal-hint { margin: 0 0 22px; }
-
-  /* Held in the layout rather than removed, so choosing a room does not
-     shove the date field around. visibility also takes it out of the tab
-     order and off the accessibility tree, which display:none would too. */
-  .hint.cal-hint.is-empty { visibility: hidden; }
 
   #cal-dialog {
     width: min(92vw, 900px);

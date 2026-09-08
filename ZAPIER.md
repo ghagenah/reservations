@@ -153,6 +153,17 @@ instants carrying the Pacific offset, DST included. The Zaps recombine a date
 with plain-text times like `11:00 AM` instead, which is more parsing and more to
 go wrong.
 
+**Repeats (multi-day-booking branch).** The form sends three new fields:
+`repeatFrequency` (`Does not repeat` / `Daily` / `Weekly` / `Monthly`),
+`repeatCount` (total occurrences, `1` when not repeating) and `repeatDates`
+(the expanded list, `YYYY-MM-DD` comma-joined). Frequency and count plug into
+the Zap's existing recurrence fields on the calendar event. Two things to
+know: the form checks **every** date for conflicts at submit, but the child
+Zap's own availability check only guards the first date — the last-word layer
+does not see the rest of the series. And monthly from the 29th–31st follows
+RRULE semantics (short months are skipped, the count still completes), which
+is also what Google does, so the form's preview and the created events agree.
+
 **DARC needs its own Zap.** The DARC form has two rooms and sends the chosen room
 with every request for exactly this reason — branch on it to pick which calendar
 to check and write to. The existing Zaps are Panetta-specific throughout: the

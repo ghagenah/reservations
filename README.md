@@ -109,7 +109,7 @@ not restored from a saved draft.
 
 ## Testing
 
-`test.html` runs 46 assertions against the real forms, loaded in hidden
+`test.html` runs 77 assertions against the real forms, loaded in hidden
 frames. Open it in a browser — no build step, nothing to install. It covers
 the logic that fails silently rather than loudly: daylight saving, the
 booking window, busy-interval boundaries, the contiguous-block rules, the
