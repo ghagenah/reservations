@@ -147,7 +147,7 @@
   /* ---------- Calendar dialog ---------- */
 
   .cal-link {
-    padding: 4px 0 1px;   /* a little breathing room above, underline kept tight */
+    padding: 0;           /* it reads as part of the sentence around it */
     font: inherit;
     font-size: 13px;
     color: var(--blue);
@@ -157,19 +157,6 @@
     cursor: pointer;
   }
   .cal-link:hover { color: var(--blue-dark); }
-
-  /* Belongs to the room picker above it, not the date field below. Sibling
-     margins collapse to the larger, so the fieldset's own 20px is trimmed for
-     this one case rather than fought with a negative margin here. */
-  #room-field:not([hidden]) { margin-bottom: 6px; }
-  /* .hint is defined further down and would win at equal specificity, so
-     this is qualified rather than silently overridden. */
-  .hint.cal-hint { margin: 0 0 22px; }
-
-  /* Held in the layout rather than removed, so choosing a room does not
-     shove the date field around. visibility also takes it out of the tab
-     order and off the accessibility tree, which display:none would too. */
-  .hint.cal-hint.is-empty { visibility: hidden; }
 
   #cal-dialog {
     width: min(92vw, 900px);

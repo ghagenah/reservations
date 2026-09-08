@@ -111,15 +111,13 @@
       <div class="choices" id="room-choices"></div>
     </fieldset>
 
-    <!-- Outside the fieldset above: that is hidden on a one-room space, and
-         the calendar link has to survive it. -->
-    <p class="hint cal-hint" id="cal-hint">
-      <button type="button" class="cal-link" id="cal-open">View the full calendar</button>
-    </p>
-
     <div class="field">
       <label for="date">Date <span class="req" aria-hidden="true">*</span></label>
-      <p class="hint" id="date-window"><span id="date-window-text"></span></p>
+      <!-- The calendar link rides in this sentence rather than sitting in its
+           own block: inline, hiding it until a room is chosen just shortens
+           the line instead of moving the date field up the page. -->
+      <p class="hint" id="date-window"><span id="date-window-text"></span>
+        <button type="button" class="cal-link" id="cal-open">View the full calendar</button></p>
       <input type="date" id="date" name="date" required>
     </div>
 
